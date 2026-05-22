@@ -73,10 +73,7 @@ CREATE TRIGGER exercise_progression_type_immutable
 BEFORE UPDATE OF progression_type ON exercise
 WHEN OLD.progression_type IS NOT NEW.progression_type
 BEGIN
-  SELECT RAISE(ABORT,
-    'exercise.progression_type is immutable (derived from I-10). '
-    'To change the type, create a new exercise.'
-  );
+  SELECT RAISE(ABORT, 'exercise.progression_type is immutable (derived from I-10). To change the type, create a new exercise.');
 END;
 
 
