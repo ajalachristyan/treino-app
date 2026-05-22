@@ -1,0 +1,17 @@
+{
+  "name": "treino-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "App pessoal de treino (PWA local-first, single-user). Ver brief-data-model-fase0.md.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.7"
+  }
+}
