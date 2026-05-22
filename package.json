@@ -4,6 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "description": "App pessoal de treino (PWA local-first, single-user). Ver brief-data-model-fase0.md.",
+  "engineNotes": {
+    "testEngines": "better-sqlite3 (SQLite 3.53.1) e wa-sqlite@1.0.0 (SQLite 3.44.0) sao devDependency — engines de TESTE. Sao parametrizados na suite de invariantes para fechar a fresta de drift de versao do SQLite.",
+    "productionEngine": "NAO SELADO. A escolha do engine de producao (em OPFS no celular) tem GATILHO DE REVISAO documentado em DECISIONS.md antes do primeiro empacotamento que persista em OPFS. Nao empacotar producao sobre wa-sqlite@1.0.0 sem essa reavaliacao."
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -18,6 +22,7 @@
     "@types/uuid": "^10.0.0",
     "better-sqlite3": "^12.10.0",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "wa-sqlite": "^1.0.0"
   }
 }
