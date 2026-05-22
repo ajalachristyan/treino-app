@@ -1,0 +1,30 @@
+# Dependências
+node_modules/
+
+# Build / dist
+dist/
+build/
+.vite/
+
+# Variáveis de ambiente (chave da Anthropic mora aqui — nunca commitar)
+.env
+.env.local
+.env.*.local
+
+# Banco local de desenvolvimento (o real fica em OPFS, mas testes podem gerar)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Testes
+coverage/
+.vitest-cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
