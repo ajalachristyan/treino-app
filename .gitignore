@@ -22,6 +22,9 @@ build/
 coverage/
 .vitest-cache/
 
+# Estado local da ferramenta (memoria do agente, logs)
+.claude/
+
 # Editor / OS
 .vscode/
 .idea/

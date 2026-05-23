@@ -38,3 +38,23 @@ export const BACKUP_AGE_DAYS_BEFORE_THIN = 90;
 
 /** Backup versionado: após a idade acima, mantém este número por semana. */
 export const BACKUP_THINNED_KEEP_PER_WEEK = 1;
+
+// ============================================================================
+// TODO — constantes de engine ainda nao calibradas empiricamente.
+// Os testes de invariante usam entradas GROSSEIRAS (50% drop, etc.) bem alem
+// destes thresholds, validando COMPORTAMENTO de discriminacao, nao o numero.
+// Os valores aqui sao placeholders sensatos; revisar quando dados reais
+// chegarem. NUNCA validar testes contra estes numeros diretamente.
+// ============================================================================
+
+/** TODO: revisar com dados reais. Queda de jump_height (vs baseline) que sugere deload objetivo. */
+export const OBJECTIVE_DELOAD_JUMP_DROP_PCT = 0.10;
+
+/** TODO: revisar. Numero de dias consecutivos de queda de carga para sugerir deload (Secao 8.3). */
+export const CONSECUTIVE_LOAD_DROP_DAYS_FOR_DELOAD = 2;
+
+/** TODO: revisar. Queda relativa de carga diaria considerada "queda" no gatilho de deload. */
+export const LOAD_DROP_THRESHOLD_PCT = 0.30;
+
+/** TODO: revisar. Queda relativa em tendencia que classifica "regressao" (fora de deload). */
+export const TREND_REGRESSION_THRESHOLD_PCT = 0.15;
