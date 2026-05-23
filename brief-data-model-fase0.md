@@ -52,7 +52,7 @@ O lema operacional que reconcilia flexibilidade com estatística confiável:
 - **TypeScript.** Os enums deste brief são **tipos checados**, não strings livres.
 - **Sync: por arquivo no Google Drive** (o usuário já tem o conector ativo). O app lê/escreve o arquivo de banco (ou um export) no Drive. **Avalie se a API do Drive comporta esse padrão de forma confiável**; se não, **caia para export/import manual por botão** — fallback já autorizado. Não introduza backend próprio nem serviço de sync de terceiros sem perguntar.
 - **NÃO** usar `localStorage`/`sessionStorage` para dados de domínio.
-- **IA (parsing e geração):** chamadas à API da Anthropic (endpoint de mensagens) para (a) importar plano a partir de texto livre e (b) estruturar narração pós-treino. A chave é gerida pelo ambiente; não embutir no código.
+- **IA (parsing e geração):** chamadas à API da Anthropic (endpoint de mensagens) para (a) importar plano a partir de texto livre e (b) estruturar narração pós-treino. **Mecanismo de chave: pendente de decisão de arquitetura na Fase 1.** PWA sem backend não tem variável de ambiente de servidor onde a chave more; provável BYOK (usuário cola a própria chave nas configurações), com decisão em aberto sobre onde a chave persiste — ver AUDITORIA-lacunas L2. Em qualquer caso: **não embutir no código sob nenhuma hipótese**.
 
 ---
 
@@ -178,7 +178,7 @@ Separação correta: flexibilidade e força são **atividades** e **placares** s
 
 ### 7.2 Gate de timing — `acute_interference` (invariante I-13)
 
-O plano do usuário crava: hold estático longo (>60s) imediatamente antes de ginástica ou salto causa déficit agudo de força. Exercícios com `acute_interference = true` agendados antes de sessão de potência → a engine **bloqueia ou avisa**. É um gate de segurança análogo ao da dor patelar. (Fundamentação fornecida pelo usuário: Behm/Warneke 2024 — déficit relevante só >60s em força máxima isolada; saltos/RFD poupados.)
+O plano do usuário crava: hold estático longo (>60s) imediatamente antes de ginástica ou salto causa déficit agudo de força. Exercícios com `acute_interference = true` agendados antes de sessão de potência → a engine **avisa** (não bloqueia) e marca `session.interference_warned = true` para a estatística considerar; a sessão prossegue normalmente. Bloqueio duro foi descartado por contradizer §6.3 (anti-culpa). É um gate de **sinalização**, não de barreira — análogo a um aviso em mapa, não a um portão fechado. (Fundamentação fornecida pelo usuário: Behm/Warneke 2024 — déficit relevante só >60s em força máxima isolada; saltos/RFD poupados.)
 
 ### 7.3 Ramo de progressão por consistência
 
@@ -224,7 +224,7 @@ Campo de qualidade por série/hold: `enum { stable, tremor, joint_pain }`. A eng
 - `1,5–2,0` → transição; enviesa conversão (potência/RFD).
 - `> 2,0` → inverte para potência/reativo; força só se mantém.
 
-### 8.5 Gates de segurança (HARD, determinísticos)
+### 8.5 Gates de segurança (determinísticos — HARD por padrão; ver I-13 para a exceção `acute_interference`)
 
 - dor patelar > 2–3/10 → **bloqueia depth jump**; revisar.
 - regressão de salto **sustentada entre ciclos** (≠ queda transitória pré-deload, que é normal) → overreaching.
@@ -247,11 +247,11 @@ Campo de qualidade por série/hold: `enum { stable, tremor, joint_pain }`. A eng
 - **I-8 — Piso de SD na monotony.** *Teste:* carga perfeitamente uniforme não produz monotony infinita/explosiva.
 - **I-9 — ACWR sem peso decisório.** *Teste:* nenhuma decisão da engine depende da razão aguda:crônica.
 - **I-10 — `measurement_source` imutável.** *Teste:* mutação de `measurement_source` em registro existente falha.
-- **I-11 — Sync last-write-wins por `timestamp_server`.** Conflito de dois dispositivos resolve por timestamp do servidor, nunca merge ingênuo. *Teste:* dois writes concorrentes convergem para o de timestamp maior; nenhum dado é perdido silenciosamente.
+- **I-11 — Sync last-write-wins por `timestamp_server` (uso sequencial single-user).** Cobre o caso real de um único usuário usando o app **em sequência** (treina no celular, depois mexe no plano no PC), **não escrita concorrente verdadeira**. Resolução adotada (decisão A do Passo 3): sync por arquivo + LWW + **snapshot pré-sobrescrita** + **aviso de divergência** quando os dois lados saírem do mesmo ancestral — nunca merge automático. CRDT/HLC explicitamente **rejeitado** como over-engineering para single-user. *Teste:* writes em ordem temporal convergem para o de `timestamp_server` maior; nenhum dado é perdido silenciosamente (snapshot do perdedor preservado em backup versionado).
 - **I-12 — Sessão é lista mutável, não cópia read-only.** *Teste:* durante a sessão é possível adicionar (`added_adhoc`), remover, reordenar (`actual_sequence`) e substituir, e o plano original permanece intacto.
-- **I-13 — Gate de timing `acute_interference`.** *Teste:* exercício com `acute_interference = true` agendado antes de sessão de potência dispara bloqueio/aviso.
+- **I-13 — Gate de timing `acute_interference` (avisa, NÃO bloqueia).** Exercício com `acute_interference = true` agendado antes de sessão de potência dispara **aviso estruturado** + flag `session.interference_warned = true` (a sessão prossegue; a estatística considera o flag). Bloqueio duro foi **descartado**: contradiz §6.3 (anti-culpa) — o app inteiro existe para não punir desvios. *Teste:* item com `acute_interference = true` antes de bloco de potência retorna warning estruturado (não-null) e marca `interference_warned`; sem precedente, retorna null sem warning.
 - **I-14 — Deload não é regressão.** *Teste:* semana marcada como deload é excluída do cálculo de tendência de performance.
-- **I-15 — Desvio não progride o planejado.** *Teste:* item `substituted` ou `skipped` nunca dispara a progressão do exercício originalmente planejado.
+- **I-15 — Desvio não progride o planejado (MAS o substituto progride a si mesmo — refino R3).** Protege apenas o **planejado-não-feito**: um item `substituted` ou `skipped` nunca dispara progressão do exercício originalmente planejado. **Refino R3 acordado no Passo 2:** o substituto **SEMPRE** progride a si mesmo se foi executado, qualquer `deviation_reason` — leg press feito no lugar do agachamento PROGRIDE o leg press (foi executado de fato). O `deviation_reason` só protege a engine de **sugestão** de aprender preferência falsa (`equipment_busy` não vira "ele gosta de leg press"); NÃO bloqueia progressão do que foi executado. *Teste:* (a) item `substituted` não dispara progressão do exercício *planejado*; (b) item `substituted`, com séries no topo do rep_range, dispara progressão do exercício *substituto* (mesmo `deviation_reason='equipment_busy'`).
 
 ---
 
