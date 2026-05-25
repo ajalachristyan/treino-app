@@ -23,7 +23,17 @@ coverage/
 .vitest-cache/
 
 # Estado local da ferramenta (memoria do agente, logs)
-.claude/
+# Padrao: tudo ignorado. Allowlist EXPLICITA por arquivo nominal -
+# adicionar novo arquivo em hooks/ ou agents/ exige edicao deste .gitignore.
+# settings.local.json (permissoes pessoais) NAO entra; nem logs, nem cache, nem memoria.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/stop-check.mjs
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/revisor-treino.md
 
 # Editor / OS
 .vscode/
