@@ -11,7 +11,7 @@
 // =============================================================================
 
 import type { Database } from "./adapter.ts";
-import type { MigrationFile } from "./migrations.ts";
+import type { MigrationFile } from "./migrations.manifest.ts";
 
 /**
  * Fonte das migrations. Injetada em `applyMigrations` para manter o runner

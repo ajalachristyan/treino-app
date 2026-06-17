@@ -13,23 +13,17 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { MIGRATION_MANIFEST } from "./migrations.manifest.ts";
+import type { MigrationFile } from "./migrations.manifest.ts";
+
+// Re-export para nao quebrar quem importava MigrationFile/MIGRATION_MANIFEST
+// daqui. A fonte unica de verdade dos tipos e do manifesto agora e
+// ./migrations.manifest.ts (browser-safe, sem node:*).
+export type { MigrationFile } from "./migrations.manifest.ts";
+export { MIGRATION_MANIFEST } from "./migrations.manifest.ts";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, "..", "..", "migrations");
-
-export interface MigrationFile {
-  readonly version: number;
-  readonly name: string;
-  readonly sql: string;
-}
-
-interface MigrationManifestEntry {
-  readonly version: number;
-  readonly name: string;
-}
-
-export const MIGRATION_MANIFEST: ReadonlyArray<MigrationManifestEntry> = [
-  { version: 1, name: "001_init" },
-] as const;
 
 export async function loadMigrations(): Promise<MigrationFile[]> {
   return Promise.all(
