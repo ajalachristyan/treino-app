@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { rsi, rsiMod } from "../engine/derivations.ts";
 import { applyMigrations } from "../db/runner.ts";
+import { loadMigrations } from "../db/migrations.ts";
 import { engines, type Database } from "./_helpers/engines.ts";
 
 describe.each(engines)(
@@ -19,7 +20,7 @@ describe.each(engines)(
     let db: Database;
     beforeEach(async () => {
       db = await openDb(":memory:");
-      await applyMigrations(db);
+      await applyMigrations(db, loadMigrations);
     });
     afterEach(async () => {
       await db.close();

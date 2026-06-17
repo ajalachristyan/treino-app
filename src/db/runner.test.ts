@@ -4,6 +4,7 @@ import type { Database } from "./adapter.ts";
 import { BetterSqlite3Adapter } from "./adapters/better-sqlite3.ts";
 import { WaSqliteNodeAdapter } from "./adapters/wa-sqlite-node.ts";
 import { applyMigrations, currentSchemaVersion } from "./runner.ts";
+import { loadMigrations } from "./migrations.ts";
 
 // ============================================================================
 // LEVA 1 do Passo 5 — INFRAESTRUTURA DE TESTE.
@@ -72,7 +73,7 @@ describe.each(engines)("db adapter + runner — %s", (_engineName, openDb) => {
   it("apply from empty db brings schema to version 1", async () => {
     expect(await currentSchemaVersion(db)).toBe(0);
 
-    await applyMigrations(db);
+    await applyMigrations(db, loadMigrations);
 
     expect(await currentSchemaVersion(db)).toBe(1);
 
@@ -91,12 +92,12 @@ describe.each(engines)("db adapter + runner — %s", (_engineName, openDb) => {
   // 2. Idempotencia: aplicar duas vezes nao duplica versao nem quebra.
   // ===========================================================================
   it("apply twice is idempotent — second call is no-op", async () => {
-    await applyMigrations(db);
+    await applyMigrations(db, loadMigrations);
     const versionsAfterFirst = await db.all<{ version: number }>(
       `SELECT version FROM schema_version`,
     );
 
-    await applyMigrations(db);
+    await applyMigrations(db, loadMigrations);
     const versionsAfterSecond = await db.all<{ version: number }>(
       `SELECT version FROM schema_version`,
     );
