@@ -1,253 +1,203 @@
 // =============================================================================
-// Adapter para wa-sqlite rodando no BROWSER com persistencia em OPFS.
+// Proxy de MAIN THREAD para wa-sqlite + OPFS, que de fato roda dentro de um
+// Web Worker (ver src/db/opfs-worker.ts).
 //
-// Este e o engine de PRODUCAO alvo (PWA local-first no celular). O SQL e a
-// logica de step/bind/transaction sao IDENTICOS ao wa-sqlite-node.ts — a JS
-// API do wa-sqlite e a mesma. So mudam (a) o carregamento do WASM e (b) o VFS:
-//   - Node:    WASM via readFile + default VFS in-memory.
-//   - Browser: WASM via URL do Vite (?url) + AccessHandlePoolVFS sobre OPFS.
+// POR QUE WORKER (mudanca da spike Fase 0): o AccessHandlePoolVFS depende de
+// FileSystemFileHandle.createSyncAccessHandle(), API que so existe em contexto
+// de Web Worker — NAO na main thread. Verificado em Chrome real:
+// "createSyncAccessHandle is not a function" ao rodar na main thread. Por isso
+// este arquivo deixou de ser o engine e virou um PROXY FINO: cria o worker,
+// fala com ele via postMessage RPC, e a interface async Database (adapter.ts)
+// mapeia 1:1 em mensagens. Toda a logica de step/bind/exec/VFS migrou para o
+// worker (mesmas funcoes, mesmos hedges defensivos).
 //
-// BUILD SINCRONO: usamos wa-sqlite.mjs/.wasm (NAO o -async). O AccessHandlePool
-// VFS usa FileSystemSyncAccessHandle (metodos sincronos) e o proprio docblock
-// dele diz que casa com o build regular do SQLite (sem Asyncify). Por isso a
-// JS API continua expondo step/exec como Promise (o Factory envolve), mas o
-// VFS por baixo nao precisa do Asyncify.
-//
-// D1 (PONTO DE REVISAO — journaling em OPFS): NAO ligamos WAL/synchronous as
-// cegas aqui. O AccessHandlePoolVFS tem caracteristicas proprias de journaling
-// (arquivos de journal/WAL vivem no mesmo diretorio flat). A decisao de modo
-// de journal sobre OPFS e o gatilho de revisao do engine de producao estao no
-// DECISIONS.md — NAO selar nesta spike.
-//
-// PROPAGACAO DE ERRO: identica ao node adapter — o Factory envolve `step` e
-// dispara em rc de erro; os `if (rc !== SQLITE_DONE) throw` sao hedge defensivo
-// (falha LOUD se algum rc obscuro escapar).
+// D1 (PONTO DE REVISAO — journaling em OPFS): a decisao de WAL/synchronous
+// sobre OPFS e o gatilho de revisao do engine de producao seguem no DECISIONS.md
+// — NAO selados nesta spike. (O worker liga apenas foreign_keys = ON.)
 // =============================================================================
-
-import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
-import * as SQLite from "wa-sqlite";
-import { AccessHandlePoolVFS } from "wa-sqlite/src/examples/AccessHandlePoolVFS.js";
-import wasmUrl from "wa-sqlite/dist/wa-sqlite.wasm?url";
 
 import type { Database } from "../adapter.ts";
 
-const SQLITE_ROW = 100;
-const SQLITE_DONE = 101;
-
-// Diretorio flat em OPFS onde o AccessHandlePoolVFS guarda seus arquivos.
-const OPFS_DIR = "/treino-opfs";
-
-// Nome fixo do arquivo de banco. Callers passam um `path` por paridade de
-// interface (igual ao node adapter), mas no browser o nome real e fixo — o
-// que persiste em OPFS e a identidade do app, nao o caminho que o caller pediu.
-const DB_FILENAME = "treino.sqlite";
-
-type BindValue = string | number | bigint | null | Uint8Array;
-
-interface WaSqliteApi {
-  open_v2(path: string, flags?: number, vfs?: string): Promise<number>;
-  close(db: number): Promise<number>;
-  exec(
-    db: number,
-    sql: string,
-    callback?: (row: unknown[], cols: string[]) => void,
-  ): Promise<number>;
-  statements(db: number, sql: string): AsyncIterable<number>;
-  step(stmt: number): Promise<number>;
-  finalize(stmt: number): Promise<number>;
-  bind(stmt: number, i: number, value: BindValue): number;
-  column_names(stmt: number): string[];
-  row(stmt: number): unknown[];
-  vfs_register(vfs: unknown, makeDefault?: boolean): number;
+// Mensagem enviada ao worker. Espelha RpcRequest do opfs-worker.ts.
+interface RpcRequest {
+  id: number;
+  type: "open" | "exec" | "run" | "get" | "all" | "pragma" | "close";
+  sql?: string;
+  params?: unknown[];
+  name?: string;
+  value?: string | number;
 }
 
-// O Factory do WASM + o AccessHandlePoolVFS sao criados e registrados UMA vez
-// por pagina (singleton), NAO a cada open(). Motivo: o VFS adquire
-// SyncAccessHandles EXCLUSIVOS do OPFS e os mantem pelo tempo de vida da pagina
-// — close() fecha a CONEXAO, nao devolve os handles do VFS. Se cada open()
-// criasse um VFS novo, a 2a chamada na MESMA aba colidiria com os handles ainda
-// presos pela 1a (erro espurio de "outra aba" na segunda acao). Espelha o
-// cachedApi do wa-sqlite-node.ts.
-let cachedApi: WaSqliteApi | null = null;
+// Resposta do worker.
+type RpcResponse =
+  | { id: number; ok: true; result: unknown }
+  | { id: number; ok: false; error: string };
 
-async function getOpfsApi(): Promise<WaSqliteApi> {
-  if (cachedApi) return cachedApi;
-  const module = await SQLiteESMFactory({ locateFile: () => wasmUrl });
-  const sqlite3 = SQLite.Factory(module) as WaSqliteApi;
-  // Acquire do OPFS: so falha aqui se OUTRA aba/instancia ja segura os handles.
-  const vfs = new AccessHandlePoolVFS(OPFS_DIR);
-  await vfs.isReady;
-  sqlite3.vfs_register(vfs, true); // makeDefault => open_v2 sem vfs usa este.
-  cachedApi = sqlite3;
-  return sqlite3;
+interface Pending {
+  resolve: (value: unknown) => void;
+  reject: (reason: Error) => void;
 }
 
 export class WaSqliteOpfsAdapter implements Database {
-  private constructor(
-    private readonly sqlite3: WaSqliteApi,
-    private readonly dbHandle: number,
-  ) {}
+  private nextId = 1;
+  private readonly pending = new Map<number, Pending>();
+
+  private constructor(private readonly worker: Worker) {
+    this.worker.onmessage = (e: MessageEvent<RpcResponse>): void => {
+      const res = e.data;
+      const entry = this.pending.get(res.id);
+      if (entry === undefined) return; // resposta orfa (nao deveria ocorrer).
+      this.pending.delete(res.id);
+      if (res.ok) {
+        entry.resolve(res.result);
+      } else {
+        entry.reject(new Error(res.error));
+      }
+    };
+    // Erro fatal do worker (ex.: falha de carregamento do WASM): rejeita tudo
+    // que estiver pendente, para nenhum await ficar pendurado para sempre.
+    this.worker.onerror = (ev: ErrorEvent): void => {
+      const err = new Error(`opfs-worker: erro fatal — ${ev.message}`);
+      for (const [, entry] of this.pending) entry.reject(err);
+      this.pending.clear();
+    };
+  }
+
+  /**
+   * Envia uma mensagem ao worker e devolve uma Promise resolvida/rejeitada pela
+   * resposta correspondente (casada por id). O worker processa as mensagens em
+   * ordem FIFO — ver a nota de transaction() abaixo.
+   */
+  private rpc<T = unknown>(req: Omit<RpcRequest, "id">): Promise<T> {
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      this.worker.postMessage({ id, ...req } satisfies RpcRequest);
+    });
+  }
 
   static async open(path: string): Promise<WaSqliteOpfsAdapter> {
-    // O `path` do caller e ignorado para o nome real (ver DB_FILENAME); mantido
-    // na assinatura por paridade com a interface Database.
+    // O `path` do caller e ignorado para o nome real (o worker fixa o nome do
+    // arquivo em OPFS); mantido na assinatura por paridade com a interface
+    // Database.
     void path;
 
-    // Factory + VFS sao singleton por pagina (ver getOpfsApi). So lanca aqui se
-    // OUTRA aba/instancia ja segura os SyncAccessHandles do OPFS.
-    let sqlite3: WaSqliteApi;
+    // new URL(..., import.meta.url) + { type: "module" } e o padrao suportado
+    // pelo Vite para empacotar o worker como chunk proprio (e o .wasm como
+    // asset). Ver docs do Vite "Web Workers".
+    const worker = new Worker(new URL("../opfs-worker.ts", import.meta.url), {
+      type: "module",
+    });
+
+    const adapter = new WaSqliteOpfsAdapter(worker);
+
     try {
-      sqlite3 = await getOpfsApi();
+      await adapter.rpc({ type: "open" });
     } catch (err) {
-      throw new Error(
-        "treino-app: nao foi possivel abrir o OPFS (provavelmente aberto em " +
-          "outra aba/instancia). Feche as outras abas e recarregue.",
-        { cause: err },
-      );
+      // O worker sinaliza "OPFS_LOCKED" quando outra aba/instancia ja segura os
+      // SyncAccessHandles do OPFS. Mapeia para a mensagem PT-BR tipada.
+      worker.terminate();
+      if (err instanceof Error && err.message === "OPFS_LOCKED") {
+        throw new Error(
+          "treino-app: banco aberto em outra aba/instancia. Feche as outras " +
+            "abas e recarregue.",
+          { cause: err },
+        );
+      }
+      throw err;
     }
 
-    const dbHandle = await sqlite3.open_v2(DB_FILENAME);
-    const adapter = new WaSqliteOpfsAdapter(sqlite3, dbHandle);
-
-    // FK eh per-connection (igual better-sqlite3 e ao node adapter); sem isso o
-    // schema fica com FK decorativas.
-    await adapter.pragma("foreign_keys", "ON");
-
-    // WAL/synchronous: ver cabecalho (D1). NAO ligar aqui sem revisao.
     return adapter;
   }
 
   async exec(sql: string): Promise<void> {
-    await this.sqlite3.exec(this.dbHandle, sql);
+    await this.rpc<void>({ type: "exec", sql });
   }
 
   async run(sql: string, params: readonly unknown[] = []): Promise<void> {
-    for await (const stmt of this.sqlite3.statements(this.dbHandle, sql)) {
-      this.bindAll(stmt, params);
-      const rc = await this.sqlite3.step(stmt);
-      // Hedge defensivo (ver cabecalho): em erro, o step ja teria lancado;
-      // se chegou aqui com rc !== DONE, algo escapou. Falha LOUD.
-      if (rc !== SQLITE_DONE) {
-        throw new Error(
-          `wa-sqlite: unexpected step rc in run(): ${rc} ` +
-            `(expected SQLITE_DONE=${SQLITE_DONE})`,
-        );
-      }
-    }
+    await this.rpc<void>({ type: "run", sql, params: params as unknown[] });
   }
 
   async get<T = unknown>(
     sql: string,
     params: readonly unknown[] = [],
   ): Promise<T | undefined> {
-    let result: T | undefined = undefined;
-    for await (const stmt of this.sqlite3.statements(this.dbHandle, sql)) {
-      this.bindAll(stmt, params);
-      if (result === undefined) {
-        const rc = await this.sqlite3.step(stmt);
-        if (rc === SQLITE_ROW) {
-          result = this.rowToObject<T>(stmt);
-        } else if (rc !== SQLITE_DONE) {
-          // Hedge: rc inesperado eh erro nao-lancado pelo Factory. Falha LOUD.
-          throw new Error(
-            `wa-sqlite: unexpected step rc in get(): ${rc} ` +
-              `(expected ROW=${SQLITE_ROW} or DONE=${SQLITE_DONE})`,
-          );
-        }
-      }
-    }
-    return result;
+    return this.rpc<T | undefined>({
+      type: "get",
+      sql,
+      params: params as unknown[],
+    });
   }
 
   async all<T = unknown>(
     sql: string,
     params: readonly unknown[] = [],
   ): Promise<T[]> {
-    const rows: T[] = [];
-    for await (const stmt of this.sqlite3.statements(this.dbHandle, sql)) {
-      this.bindAll(stmt, params);
-      while (true) {
-        const rc = await this.sqlite3.step(stmt);
-        if (rc === SQLITE_DONE) break;
-        if (rc !== SQLITE_ROW) {
-          // Hedge: rc inesperado eh erro nao-lancado pelo Factory. Falha LOUD.
-          throw new Error(
-            `wa-sqlite: unexpected step rc in all(): ${rc} ` +
-              `(expected ROW=${SQLITE_ROW} or DONE=${SQLITE_DONE})`,
-          );
-        }
-        rows.push(this.rowToObject<T>(stmt));
-      }
-    }
-    return rows;
+    return this.rpc<T[]>({ type: "all", sql, params: params as unknown[] });
   }
 
   async pragma(name: string, value?: string | number): Promise<unknown> {
-    if (value !== undefined) {
-      await this.sqlite3.exec(this.dbHandle, `PRAGMA ${name} = ${value}`);
-      return undefined;
-    }
-    let result: unknown = undefined;
-    await this.sqlite3.exec(
-      this.dbHandle,
-      `PRAGMA ${name}`,
-      (row: unknown[]) => {
-        if (result === undefined) result = row[0];
-      },
+    // exactOptionalPropertyTypes: so inclui `value` na mensagem se foi passado.
+    return this.rpc<unknown>(
+      value !== undefined
+        ? { type: "pragma", name, value }
+        : { type: "pragma", name },
     );
-    return result;
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    await this.sqlite3.exec(this.dbHandle, "BEGIN");
+    // IDENTICO em forma ao node adapter: BEGIN ... COMMIT, com ROLLBACK no
+    // catch. Funciona via RPC porque (a) o worker processa as mensagens em
+    // ordem FIFO e (b) este app e single-user e nao-reentrante — nao ha duas
+    // transacoes concorrentes disputando a mesma conexao. Se um dia houver
+    // operacoes concorrentes na mesma conexao, esta suposicao precisa revisao
+    // (igual a nota do node adapter).
+    await this.exec("BEGIN");
     let result: T;
     try {
       result = await fn();
     } catch (err) {
       try {
-        await this.sqlite3.exec(this.dbHandle, "ROLLBACK");
+        await this.exec("ROLLBACK");
       } catch {
         // ja abortada por constraint; estado consistente.
       }
       throw err;
     }
-    await this.sqlite3.exec(this.dbHandle, "COMMIT");
+    await this.exec("COMMIT");
     return result;
   }
 
   async close(): Promise<void> {
-    await this.sqlite3.close(this.dbHandle);
+    try {
+      await this.rpc<void>({ type: "close" });
+    } finally {
+      // Sempre encerra o worker, mesmo se o close logico falhar — senao o
+      // worker (e os SyncAccessHandles do OPFS) vazam.
+      this.worker.terminate();
+    }
   }
 
   /**
    * "Hard reset" da spike: apaga o diretorio do AccessHandlePoolVFS em OPFS.
-   * Best-effort — engole erro se o diretorio nao existir ainda. Deve ser
-   * chamado com o banco FECHADO (sem handles abertos) para nao colidir com os
-   * SyncAccessHandles do VFS.
+   * Best-effort — engole erro se o diretorio nao existir ainda.
+   *
+   * PRECISA do worker FECHADO (sem SyncAccessHandles vivos): remover o
+   * diretorio enquanto o VFS o segura colide. O harness (App.tsx) abre/fecha o
+   * banco por acao e instrui recarregar a pagina apos o reset — o que descarta
+   * o worker e libera os handles. Por isso este metodo NAO precisa de um worker
+   * proprio: opera direto na OPFS pela main thread (removeEntry e main-thread).
    */
   static async deleteDatabase(): Promise<void> {
     const root = await navigator.storage.getDirectory();
     try {
       // removeEntry nao aceita "/" no nome; usa o nome do diretorio sem a barra.
-      await root.removeEntry(OPFS_DIR.replace(/^\//, ""), { recursive: true });
+      await root.removeEntry("treino-opfs", { recursive: true });
     } catch {
       // diretorio inexistente ou ja removido — no-op.
     }
-  }
-
-  private bindAll(stmt: number, params: readonly unknown[]): void {
-    for (let i = 0; i < params.length; i++) {
-      this.sqlite3.bind(stmt, i + 1, params[i] as BindValue);
-    }
-  }
-
-  private rowToObject<T>(stmt: number): T {
-    const cols = this.sqlite3.column_names(stmt);
-    const vals = this.sqlite3.row(stmt);
-    const row: Record<string, unknown> = {};
-    for (let i = 0; i < cols.length; i++) {
-      row[cols[i] as string] = vals[i];
-    }
-    return row as T;
   }
 }
