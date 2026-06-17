@@ -46,7 +46,12 @@ jobs:
         run: npm run build
 
       - name: Configure Pages
+        # enablement: true => habilita o GitHub Pages (source = Actions) na
+        # PRIMEIRA execucao, sem passo manual em Settings. Requer a permissao
+        # pages: write (concedida acima).
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
