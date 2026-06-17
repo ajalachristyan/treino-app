@@ -29,7 +29,8 @@
 
 import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
 import * as SQLite from "wa-sqlite";
-import { AccessHandlePoolVFS } from "wa-sqlite/src/examples/AccessHandlePoolVFS.js";
+// VENDORADO (capacity 3) — ver ./vendor/AccessHandlePoolVFS.js e o cabecalho de doOpen.
+import { AccessHandlePoolVFS } from "./vendor/AccessHandlePoolVFS.js";
 import wasmUrl from "wa-sqlite/dist/wa-sqlite.wasm?url";
 
 const SQLITE_ROW = 100;
@@ -190,24 +191,19 @@ async function doPragma(
 // -----------------------------------------------------------------------------
 // Init lazy do engine (factory + VFS + conexao). So roda na 1a mensagem 'open'.
 //
-// RETRY (correcao do erro iOS "unknown transient reason"): o iOS Safari limita
-// ~5-6 FileSystemSyncAccessHandles simultaneos, e o AccessHandlePoolVFS pre-aloca
-// DEFAULT_CAPACITY=6 no isReady. Em carga fresca — ou logo apos uma tentativa que
-// falhou e cujos handles o iOS ainda nao reciclou — o createSyncAccessHandle
-// falha com erro TRANSITORIO. A cura comprovada (mesma do opfs-sahpool oficial
-// da SQLite) e retentar com backoff: o delay da ao iOS tempo de liberar os
-// handles presos. Como o vfs so e registrado APOS isReady ter sucesso, uma
-// tentativa que falha nunca fica pendurada no SQLite (GC reclama).
+// CAPACITY REDUZIDA (correcao do erro iOS "unknown transient reason"): o iOS
+// Safari limita ~5-6 FileSystemSyncAccessHandles simultaneos. O AccessHandlePool
+// VFS padrao pre-aloca 6 no isReady — no limite do iOS, estoura. Usamos o VFS
+// VENDORADO (./vendor/AccessHandlePoolVFS.js) com DEFAULT_CAPACITY=3 (1 conexao
+// rollback-journal usa db+journal, ~2), bem abaixo do limite.
+//
+// SEM RETRY de proposito: retentar recriando o VFS NO MESMO worker so PIORAVA —
+// cada tentativa que falha deixa handles presos (nao ha release publico; GC nao
+// e imediato) que colidem com a tentativa seguinte. Com capacity 3, uma
+// tentativa limpa basta. Se ainda falhar no device, a escalada e trocar de VFS
+// (OPFSCoopSyncVFS, handles lazy/cooperativos) via upgrade do wa-sqlite — Divida
+// D1. (Confirmado por leitura do source: OPFSCoopSyncVFS NAO exige COOP/COEP.)
 // -----------------------------------------------------------------------------
-
-// Backoff entre tentativas de adquirir o OPFS (ms). 1 tentativa inicial + estes
-// retries = 5 no total. Numeros provisorios (sem fundamento empirico proprio);
-// gatilho de revisao junto com a Divida D1 (versao do wa-sqlite / VFS).
-const OPEN_RETRY_DELAYS_MS = [100, 200, 400, 800] as const;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 async function doOpen(): Promise<void> {
   if (sqlite3 !== null && dbHandle !== null) return; // idempotente
@@ -215,39 +211,20 @@ async function doOpen(): Promise<void> {
   const module = await SQLiteESMFactory({ locateFile: () => wasmUrl });
   const api = SQLite.Factory(module) as WaSqliteApi;
 
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= OPEN_RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      // createSyncAccessHandle so funciona AQUI (no worker). O pool de handles
-      // e adquirido dentro de isReady — onde o erro transitorio do iOS aparece.
-      const vfs = new AccessHandlePoolVFS(OPFS_DIR);
-      await vfs.isReady;
-      api.vfs_register(vfs, true); // makeDefault => open_v2 sem vfs usa este.
+  // createSyncAccessHandle so funciona AQUI (no worker). O pool (capacity 3 no
+  // VFS vendorado) e adquirido dentro de isReady.
+  const vfs = new AccessHandlePoolVFS(OPFS_DIR);
+  await vfs.isReady;
+  api.vfs_register(vfs, true); // makeDefault => open_v2 sem vfs usa este.
 
-      const handle = await api.open_v2(DB_FILENAME);
+  const handle = await api.open_v2(DB_FILENAME);
 
-      // FK eh per-connection (igual better-sqlite3 e ao node adapter); sem isso o
-      // schema fica com FK decorativas. WAL/synchronous: ver cabecalho (D1).
-      await api.exec(handle, "PRAGMA foreign_keys = ON");
+  // FK eh per-connection (igual better-sqlite3 e ao node adapter); sem isso o
+  // schema fica com FK decorativas. WAL/synchronous: ver cabecalho (D1).
+  await api.exec(handle, "PRAGMA foreign_keys = ON");
 
-      sqlite3 = api;
-      dbHandle = handle;
-      return; // sucesso
-    } catch (err) {
-      lastErr = err;
-      const delay = OPEN_RETRY_DELAYS_MS[attempt];
-      if (delay === undefined) break; // ultima tentativa falhou — desiste
-      console.warn(
-        `opfs-worker: acquire do OPFS falhou (tentativa ${attempt + 1}/` +
-          `${OPEN_RETRY_DELAYS_MS.length + 1}); retry em ${delay}ms`,
-        err,
-      );
-      await sleep(delay);
-    }
-  }
-  // Esgotou as tentativas: propaga o ultimo erro real (o onmessage o classifica
-  // em OPFS_LOCKED vs OPFS_INIT_FAILED e o proxy surfaca a causa crua).
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  sqlite3 = api;
+  dbHandle = handle;
 }
 
 async function doClose(): Promise<void> {
