@@ -68,6 +68,9 @@ interface WaSqliteApi {
 // — close() fecha a CONEXAO, nao devolve os handles do VFS. Como ha um worker
 // por aba, isso espelha o "singleton por pagina" da versao antiga (e o cachedApi
 // do wa-sqlite-node.ts). Mantemos UMA conexao (dbHandle) viva entre mensagens.
+// doClose() zera estes campos apos fechar, para que um 'open' subsequente no
+// MESMO worker (caso ele nao seja terminado) reinicialize do zero em vez de
+// reusar uma conexao morta.
 let sqlite3: WaSqliteApi | null = null;
 let dbHandle: number | null = null;
 
@@ -213,10 +216,21 @@ async function doOpen(): Promise<void> {
 
 async function doClose(): Promise<void> {
   if (sqlite3 !== null && dbHandle !== null) {
-    await sqlite3.close(dbHandle);
+    try {
+      await sqlite3.close(dbHandle);
+    } catch (closeErr) {
+      // Loga e segue: mesmo se o close logico falhar, zeramos os globais
+      // abaixo para nao deixar estado stale.
+      console.error("opfs-worker: falha no close do banco:", closeErr);
+    }
   }
-  // Nao zeramos sqlite3/dbHandle: o proxy chama terminate() logo apos o close,
-  // descartando o worker inteiro. Manter os campos evita reabrir por engano.
+  // Zera os globais do singleton: normalmente o proxy chama terminate() logo
+  // apos o close (descartando o worker inteiro), mas se o worker NAO for
+  // terminado, zerar aqui evita reusar uma conexao ja fechada (estado stale) —
+  // um 'open' subsequente reinicializa do zero (doOpen e idempotente so quando
+  // ambos os campos estao setados).
+  sqlite3 = null;
+  dbHandle = null;
 }
 
 // -----------------------------------------------------------------------------
@@ -231,11 +245,40 @@ async function doClose(): Promise<void> {
 
 interface RpcRequest {
   id: number;
-  type: "open" | "exec" | "run" | "get" | "all" | "pragma" | "close";
+  type: "open" | "probe" | "exec" | "run" | "get" | "all" | "pragma" | "close";
   sql?: string;
   params?: unknown[];
   name?: string;
   value?: string | number;
+}
+
+// Resultado do probe de capacidades (ver doProbe). So flags de presenca de API,
+// lidas no contexto do worker — sem efeito colateral.
+interface ProbeResult {
+  hasGetDirectory: boolean;
+  hasCreateSyncAccessHandle: boolean;
+  workerUserAgent: string;
+}
+
+// -----------------------------------------------------------------------------
+// PROBE de capacidades (SEM efeito colateral). NAO instancia o
+// AccessHandlePoolVFS (instanciar adquiriria os SyncAccessHandles EXCLUSIVOS e
+// bloquearia o open real) e NAO abre o banco. So devolve flags de presenca das
+// APIs de OPFS vistas DENTRO do worker — o que o botao Diagnostico do harness
+// usa para distinguir "navegador embutido / sem OPFS" de "banco em outra aba".
+// -----------------------------------------------------------------------------
+function doProbe(): ProbeResult {
+  const hasGetDirectory =
+    typeof navigator?.storage?.getDirectory === "function";
+  const hasCreateSyncAccessHandle =
+    typeof FileSystemFileHandle !== "undefined" &&
+    !!FileSystemFileHandle.prototype &&
+    "createSyncAccessHandle" in FileSystemFileHandle.prototype;
+  return {
+    hasGetDirectory,
+    hasCreateSyncAccessHandle,
+    workerUserAgent: navigator.userAgent,
+  };
 }
 
 self.onmessage = async (e: MessageEvent<RpcRequest>): Promise<void> => {
@@ -248,15 +291,29 @@ self.onmessage = async (e: MessageEvent<RpcRequest>): Promise<void> => {
         try {
           await doOpen();
         } catch (openErr) {
-          // O acquire do AccessHandlePoolVFS falha se outra aba/instancia ja
-          // segura os SyncAccessHandles. Sinaliza com um codigo estavel para o
-          // proxy mapear para a mensagem PT-BR tipada.
-          self.postMessage({ id, ok: false, error: "OPFS_LOCKED" });
-          // Loga a causa real no console do worker para depuracao.
-          console.error("opfs-worker: falha no acquire do OPFS:", openErr);
+          // Loga a causa real no console do worker para depuracao (sempre).
+          console.error("opfs-worker: falha ao abrir o OPFS:", openErr);
+          // DESMASCARAR: antes, QUALQUER throw aqui virava "OPFS_LOCKED",
+          // mascarando navegador embutido / OPFS ausente / modo privado como
+          // se fosse disputa de aba. Agora so usamos "OPFS_LOCKED" se a
+          // mensagem real indicar lock genuino; o resto sobe como
+          // "OPFS_INIT_FAILED: <mensagem real>" para o proxy surfacar a causa.
+          const realMsg =
+            openErr instanceof Error ? openErr.message : String(openErr);
+          const looksLikeLock = /lock|exclusive/i.test(realMsg);
+          self.postMessage({
+            id,
+            ok: false,
+            error: looksLikeLock
+              ? "OPFS_LOCKED"
+              : "OPFS_INIT_FAILED: " + realMsg,
+          });
           return;
         }
         result = undefined;
+        break;
+      case "probe":
+        result = doProbe();
         break;
       case "exec":
         await doExec(msg.sql ?? "");

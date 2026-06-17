@@ -21,11 +21,18 @@ import type { Database } from "../adapter.ts";
 // Mensagem enviada ao worker. Espelha RpcRequest do opfs-worker.ts.
 interface RpcRequest {
   id: number;
-  type: "open" | "exec" | "run" | "get" | "all" | "pragma" | "close";
+  type: "open" | "probe" | "exec" | "run" | "get" | "all" | "pragma" | "close";
   sql?: string;
   params?: unknown[];
   name?: string;
   value?: string | number;
+}
+
+// Flags de capacidade devolvidas pelo probe (espelha ProbeResult do worker).
+export interface ProbeResult {
+  hasGetDirectory: boolean;
+  hasCreateSyncAccessHandle: boolean;
+  workerUserAgent: string;
 }
 
 // Resposta do worker.
@@ -85,6 +92,24 @@ export class WaSqliteOpfsAdapter implements Database {
     // Database.
     void path;
 
+    // Feature-detect de MAIN THREAD antes de gastar um worker: se nem
+    // navigator.storage.getDirectory existe, OPFS esta indisponivel neste
+    // contexto (tipico de navegador embutido no iPhone) — falha LOUD com
+    // instrucao acionavel em vez de um erro obscuro la dentro do worker.
+    if (
+      !(
+        navigator.storage &&
+        typeof navigator.storage.getDirectory === "function"
+      )
+    ) {
+      throw new Error(
+        "treino-app: OPFS indisponivel neste navegador/contexto " +
+          "(navigator.storage.getDirectory ausente). No iPhone, abra no Safari " +
+          "e/ou instale na Tela de Inicio; navegadores embutidos " +
+          "(WhatsApp/Instagram/etc.) nao suportam.",
+      );
+    }
+
     // new URL(..., import.meta.url) + { type: "module" } e o padrao suportado
     // pelo Vite para empacotar o worker como chunk proprio (e o .wasm como
     // asset). Ver docs do Vite "Web Workers".
@@ -97,20 +122,66 @@ export class WaSqliteOpfsAdapter implements Database {
     try {
       await adapter.rpc({ type: "open" });
     } catch (err) {
-      // O worker sinaliza "OPFS_LOCKED" quando outra aba/instancia ja segura os
-      // SyncAccessHandles do OPFS. Mapeia para a mensagem PT-BR tipada.
+      // PRIMEIRO desmonta o worker: rejeita o que sobrou de pending e o
+      // termina, para nenhum await ficar pendurado e nenhum SyncAccessHandle
+      // vazar — DEPOIS classifica o erro.
+      const fatal = err instanceof Error ? err : new Error(String(err));
+      for (const [, entry] of adapter.pending) entry.reject(fatal);
+      adapter.pending.clear();
       worker.terminate();
+
       if (err instanceof Error && err.message === "OPFS_LOCKED") {
+        // Lock genuino: outra aba/instancia ja segura os SyncAccessHandles.
         throw new Error(
           "treino-app: banco aberto em outra aba/instancia. Feche as outras " +
             "abas e recarregue.",
           { cause: err },
         );
       }
+      if (err instanceof Error && err.message.startsWith("OPFS_INIT_FAILED:")) {
+        // Falha real de init desmascarada pelo worker — SURFACA a causa crua
+        // (antes isso vinha mascarado como "outra aba").
+        const real = err.message.slice("OPFS_INIT_FAILED:".length).trim();
+        throw new Error(
+          `OPFS falhou ao abrir: ${real}. Possiveis causas no iPhone: ` +
+            "navegador embutido, modo privado, OPFS nao suportado.",
+          { cause: err },
+        );
+      }
+      // Qualquer outra coisa (ex.: erro fatal do worker) sobe crua.
       throw err;
     }
 
     return adapter;
+  }
+
+  /**
+   * Probe de capacidades de OPFS, sem efeito colateral. Cria um worker
+   * DESCARTAVEL, pede { type:"probe" } (que NAO instancia o VFS nem abre o
+   * banco, para nao bloquear o open real) e SEMPRE o termina no finally. Usado
+   * pelo botao Diagnostico do harness para distinguir "navegador embutido /
+   * sem OPFS" de "banco em outra aba".
+   */
+  static async probe(): Promise<ProbeResult> {
+    const worker = new Worker(new URL("../opfs-worker.ts", import.meta.url), {
+      type: "module",
+    });
+    try {
+      return await new Promise<ProbeResult>((resolve, reject) => {
+        worker.onmessage = (e: MessageEvent<RpcResponse>): void => {
+          const res = e.data;
+          if (res.ok) resolve(res.result as ProbeResult);
+          else reject(new Error(res.error));
+        };
+        worker.onerror = (ev: ErrorEvent): void => {
+          reject(new Error(`opfs-worker: erro fatal no probe — ${ev.message}`));
+        };
+        worker.postMessage({ id: 1, type: "probe" } satisfies RpcRequest);
+      });
+    } finally {
+      // Worker descartavel: sempre encerra, deu certo ou nao.
+      worker.terminate();
+    }
   }
 
   async exec(sql: string): Promise<void> {

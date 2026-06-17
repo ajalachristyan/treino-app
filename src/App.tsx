@@ -13,6 +13,7 @@
 import { useState } from "react";
 
 import { WaSqliteOpfsAdapter } from "./db/adapters/wa-sqlite-opfs.ts";
+import type { ProbeResult } from "./db/adapters/wa-sqlite-opfs.ts";
 import { applyMigrations } from "./db/runner.ts";
 import { loadMigrationsBrowser } from "./db/migrations.browser.ts";
 
@@ -26,8 +27,55 @@ type Status =
   | { kind: "ok"; msg: string }
   | { kind: "error"; msg: string };
 
+// Ambiente do navegador, calculado UMA vez. Serve para detectar o sintoma real
+// do iPhone do dono: app aberto num NAVEGADOR EMBUTIDO (in-app browser) em vez
+// do Safari — onde nao da para "Adicionar a Tela de Inicio" nem persistir.
+interface BrowserEnv {
+  standalone: boolean;
+  embedded: boolean;
+  userAgent: string;
+}
+
+// Marcadores de UA de navegadores embutidos conhecidos (in-app browsers).
+const EMBEDDED_MARKERS = [
+  "FBAN",
+  "FBAV",
+  "Instagram",
+  "Line/",
+  "Twitter",
+  "WhatsApp",
+  "Telegram",
+  "MicroMessenger",
+  "GSA/",
+  "Snapchat",
+  "Pinterest",
+];
+
+function detectEnv(): BrowserEnv {
+  const ua = navigator.userAgent;
+  const standalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as { standalone?: boolean }).standalone === true;
+  const embedded = EMBEDDED_MARKERS.some((m) => ua.includes(m));
+  return { standalone, embedded, userAgent: ua };
+}
+
+// "Safari puro" no iOS: tem "Safari" e "Version/" e NAO carrega marcador de
+// outro motor/app (CriOS=Chrome, FxiOS=Firefox, EdgiOS=Edge). Usado so para o
+// banner de aviso (heuristica, nao gate de funcionalidade).
+function looksLikeRealSafari(ua: string): boolean {
+  return (
+    /Safari/.test(ua) &&
+    /Version\//.test(ua) &&
+    !/(CriOS|FxiOS|EdgiOS|OPiOS)/.test(ua) &&
+    !EMBEDDED_MARKERS.some((m) => ua.includes(m))
+  );
+}
+
 export function App(): React.JSX.Element {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  // Calculado uma vez (initializer de useState nao reroda em re-render).
+  const [env] = useState<BrowserEnv>(detectEnv);
 
   async function withDb<T>(fn: (db: WaSqliteOpfsAdapter) => Promise<T>): Promise<T> {
     const db = await WaSqliteOpfsAdapter.open(DB_PATH);
@@ -118,14 +166,64 @@ export function App(): React.JSX.Element {
     }
   }
 
+  async function onDiagnostico(): Promise<void> {
+    setStatus({ kind: "running", msg: "Rodando diagnostico..." });
+    try {
+      const probe: ProbeResult = await WaSqliteOpfsAdapter.probe();
+      // estimate() e best-effort: nem todo contexto suporta.
+      let estimateLine = "estimate(): indisponivel";
+      try {
+        const est = await navigator.storage.estimate();
+        const usageMb = est.usage != null ? (est.usage / 1e6).toFixed(2) : "?";
+        const quotaMb = est.quota != null ? (est.quota / 1e6).toFixed(0) : "?";
+        estimateLine = `uso: ${usageMb} MB / quota: ${quotaMb} MB`;
+      } catch {
+        // mantem a linha "indisponivel".
+      }
+      setStatus({
+        kind: "ok",
+        msg:
+          `userAgent: ${env.userAgent}\n` +
+          `standalone (app instalado): ${env.standalone}\n` +
+          `embedded (navegador embutido): ${env.embedded}\n` +
+          `hasGetDirectory: ${probe.hasGetDirectory}\n` +
+          `hasCreateSyncAccessHandle: ${probe.hasCreateSyncAccessHandle}\n` +
+          `${estimateLine}`,
+      });
+    } catch (err) {
+      setStatus({ kind: "error", msg: errMsg(err) });
+    }
+  }
+
   const busy = status.kind === "running";
+  // Banner so quando faz sentido para o sintoma do iPhone: (a) marcador de
+  // navegador embutido no UA; OU (b) e iOS, nao-instalado, e o UA nao parece
+  // Safari puro (provavel in-app browser sem marcador conhecido). O gate de iOS
+  // evita falso-positivo em Chrome/Firefox DESKTOP (que tambem nao tem
+  // "Version/" e cairiam na clausula (b) sem ele).
+  const isIOS = /iPhone|iPad|iPod/.test(env.userAgent);
+  const showEmbeddedWarning =
+    env.embedded ||
+    (isIOS && !env.standalone && !looksLikeRealSafari(env.userAgent));
 
   return (
     <main style={S.main}>
+      {showEmbeddedWarning && (
+        <section style={S.embeddedBanner}>
+          ⚠️ Você não parece estar no Safari (talvez um navegador embutido,
+          aberto de dentro de outro app). No iPhone, abra no Safari: toque em
+          ••• / Compartilhar → "Abrir no Safari". Só no Safari dá para Adicionar
+          à Tela de Início e salvar os dados.
+        </section>
+      )}
+
       <h1 style={S.h1}>Treino — spike de persistência (Fase 0)</h1>
       <p style={S.sub}>
         wa-sqlite + OPFS (AccessHandlePoolVFS, build síncrono) rodando o schema
         real.
+      </p>
+      <p style={S.installedLine}>
+        Modo app instalado: {env.standalone ? "sim" : "não"}
       </p>
 
       <div style={S.buttons}>
@@ -137,6 +235,9 @@ export function App(): React.JSX.Element {
         </button>
         <button style={S.btn} disabled={busy} onClick={onPersistencia}>
           Status de persistência
+        </button>
+        <button style={S.btn} disabled={busy} onClick={onDiagnostico}>
+          Diagnóstico
         </button>
         <button style={{ ...S.btn, ...S.btnDanger }} disabled={busy} onClick={onReset}>
           Reset (apagar OPFS)
@@ -158,7 +259,10 @@ export function App(): React.JSX.Element {
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) {
-    const cause = err.cause instanceof Error ? `\n(causa: ${err.cause.message})` : "";
+    // Surfaca a causa encadeada (ex.: o OPFS_INIT_FAILED cru vindo do worker),
+    // sem o stack inteiro — so a mensagem.
+    const cause =
+      err.cause instanceof Error ? `\n[causa] ${err.cause.message}` : "";
     return `${err.message}${cause}`;
   }
   return String(err);
@@ -205,8 +309,19 @@ const S = {
     fontFamily: "system-ui, -apple-system, sans-serif",
     boxSizing: "border-box",
   },
+  embeddedBanner: {
+    fontSize: 15,
+    lineHeight: 1.5,
+    background: "#3a2d10",
+    border: "1px solid #9e6a1f",
+    color: "#f5d98b",
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
   h1: { fontSize: 22, margin: "0 0 4px" },
-  sub: { fontSize: 14, color: "#8b949e", margin: "0 0 24px", lineHeight: 1.4 },
+  sub: { fontSize: 14, color: "#8b949e", margin: "0 0 8px", lineHeight: 1.4 },
+  installedLine: { fontSize: 13, color: "#8b949e", margin: "0 0 24px" },
   buttons: { display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 },
   btn: {
     appearance: "none",
