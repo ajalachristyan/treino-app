@@ -27,6 +27,7 @@ import {
 } from "../../data/plan.ts";
 import * as sessions from "../../data/sessions.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
+import { createSerialQueue } from "../../db/concurrency.ts";
 import {
   plannedToLiveItems,
   moveItem,
@@ -54,6 +55,7 @@ export interface LiveSessionApi {
   items: LiveItem[];
   warning: InterferenceWarning | null;
   error: string | null;
+  clearError: () => void;
   start: () => void;
   resume: () => void;
   logSet: (localKey: string, measures: SetMeasures, rpe: number | null) => Promise<void>;
@@ -76,7 +78,8 @@ export function useLiveSession(): LiveSessionApi {
   const itemsRef = useRef<LiveItem[]>([]);
   const sessionIdRef = useRef<string | null>(null);
   const seqRef = useRef(1); // proximo actual_sequence (monotonico)
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  // Serializa as mutacoes via a primitiva TESTADA (concurrency.test.ts).
+  const enqueueRef = useRef(createSerialQueue());
 
   // Atualiza o ref (fresco) E o estado (render) juntos.
   const commit = useCallback((next: LiveItem[]) => {
@@ -91,20 +94,21 @@ export function useLiveSession(): LiveSessionApi {
     return s;
   }, []);
 
-  // Serializa qualquer mutacao + captura erro (surface em `error`).
+  // Serializa qualquer mutacao + captura erro (surface em `error`). NAO limpa o
+  // erro no sucesso (red team): um save bem-sucedido nao pode apagar o aviso de
+  // uma falha anterior cujo dado se perdeu — so clearError()/nova falha trocam.
   const run = useCallback((fn: () => Promise<void>): Promise<void> => {
-    const result = chain.current.then(async () => {
+    return enqueueRef.current(async () => {
       try {
         await fn();
-        setError(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setError(`Nao consegui salvar: ${msg}`);
       }
     });
-    chain.current = result.catch(() => undefined);
-    return result;
   }, []);
+
+  const clearError = useCallback((): void => setError(null), []);
 
   useEffect(() => {
     let alive = true;
@@ -225,7 +229,7 @@ export function useLiveSession(): LiveSessionApi {
     (localKey: string, measures: SetMeasures, rpe: number | null): Promise<void> =>
       run(async () => {
         const sid = sessionIdRef.current;
-        if (sid === null) return;
+        if (sid === null) throw new Error("A sessao nao esta ativa — recomece o treino.");
         const item = itemsRef.current.find((i) => i.localKey === localKey);
         if (item === undefined) return;
         const now = Date.now();
@@ -381,6 +385,7 @@ export function useLiveSession(): LiveSessionApi {
     items,
     warning,
     error,
+    clearError,
     start,
     resume,
     logSet,

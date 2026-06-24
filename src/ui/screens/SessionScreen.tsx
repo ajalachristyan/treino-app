@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useDb } from "../db/DbProvider.tsx";
 import { downloadBackup } from "../../data/backup.ts";
-import { suggestSubstitutes } from "../../data/sessions.ts";
+import { suggestSubstitutes, lastMeasuresFor } from "../../data/sessions.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
 import {
   useLiveSession,
@@ -55,6 +55,22 @@ function ItemCard({
   const [skipping, setSkipping] = useState(false);
   const [picking, setPicking] = useState(false);
   const [suggested, setSuggested] = useState<string[]>([]);
+  const [prefill, setPrefill] = useState<{
+    loaded: boolean;
+    measures: SetMeasures | undefined;
+  }>({ loaded: false, measures: undefined });
+
+  // Memoria de carga: pre-preenche o input com a ultima execucao do exercicio.
+  useEffect(() => {
+    let alive = true;
+    setPrefill({ loaded: false, measures: undefined });
+    void lastMeasuresFor(db, item.exerciseId).then((m) => {
+      if (alive) setPrefill({ loaded: true, measures: m });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [db, item.exerciseId]);
 
   const isSkipped = item.status === "skipped";
   const isPlanned = item.status === "planned";
@@ -101,9 +117,11 @@ function ItemCard({
         </ol>
       )}
 
-      {!isSkipped && (
+      {!isSkipped && prefill.loaded && (
         <SetInput
+          key={item.exerciseId}
           progressionType={item.progressionType}
+          prefill={prefill.measures}
           onSave={(m, rpe) => api.logSet(item.localKey, m, rpe)}
         />
       )}
@@ -213,7 +231,10 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
 
       {api.error !== null && (
         <div className="error-box" role="alert">
-          {api.error}
+          <div>{api.error}</div>
+          <button type="button" className="linkbtn" onClick={api.clearError}>
+            dispensar
+          </button>
         </div>
       )}
 

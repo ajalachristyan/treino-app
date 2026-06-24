@@ -56,14 +56,37 @@ export function SetInput({
   prefill?: SetMeasures | undefined;
   onSave: (measures: SetMeasures, rpe: number | null) => void | Promise<void>;
 }) {
-  // Valores iniciais a partir do prefill (memoria de carga).
-  const init = (k: string): string => {
-    const p = prefill as Record<string, unknown> | undefined;
-    const v = p?.[k];
-    return typeof v === "number" ? String(v) : "";
-  };
-  const [a, setA] = useState(() => init("reps") || init("intentPct") || init("heightCm") || init("difficultyStep") || init("seconds") || init("assistedLoadKg"));
-  const [b, setB] = useState(() => init("loadKg") || init("reps"));
+  // Valores iniciais a partir do prefill (memoria de carga), por TIPO — `a` e o
+  // 1o campo do tipo, `b` o 2o (quando ha). Mapear por tipo evita o erro de
+  // pegar reps onde o 1o campo e assist.kg (assisted_load).
+  const pf = prefill as Record<string, number | undefined> | undefined;
+  const s = (v: number | undefined): string => (typeof v === "number" ? String(v) : "");
+  const initA = ((): string => {
+    switch (progressionType) {
+      case "load_reps":
+        return s(pf?.["reps"]);
+      case "assisted_load":
+        return s(pf?.["assistedLoadKg"]);
+      case "isometric_intent":
+        return s(pf?.["intentPct"]);
+      case "jump_height":
+        return s(pf?.["heightCm"]);
+      case "difficulty_tier":
+        return s(pf?.["difficultyStep"]);
+      case "time_under_tension":
+        return s(pf?.["seconds"]);
+      default:
+        return "";
+    }
+  })();
+  const initB =
+    progressionType === "load_reps"
+      ? s(pf?.["loadKg"])
+      : progressionType === "assisted_load"
+        ? s(pf?.["reps"])
+        : "";
+  const [a, setA] = useState(initA);
+  const [b, setB] = useState(initB);
   const [quality, setQuality] = useState<QualityPerSet | null>(
     prefill?.progressionType === "contact_quality" ? prefill.quality : null,
   );

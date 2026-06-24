@@ -167,8 +167,22 @@ export function getSessionSets(
   );
 }
 
-/** Reconstroi as medidas tipadas a partir de uma linha de session_set (recovery). */
-export function setRowToMeasures(row: SessionSetRow): SetMeasures {
+/** So as colunas de medida (subset de SessionSetRow) — basta para reconstruir. */
+export interface MeasureRow {
+  progression_type: ProgressionType;
+  reps: number | null;
+  load_kg: number | null;
+  assisted_load_kg: number | null;
+  seconds: number | null;
+  height_cm: number | null;
+  intent_pct: number | null;
+  difficulty_step: number | null;
+  skill_achieved: number | null;
+  quality: string | null;
+}
+
+/** Reconstroi as medidas tipadas a partir das colunas de medida (recovery/prefill). */
+export function setRowToMeasures(row: MeasureRow): SetMeasures {
   switch (row.progression_type) {
     case "load_reps":
       return { progressionType: "load_reps", reps: row.reps ?? 0, loadKg: row.load_kg ?? 0 };
@@ -453,22 +467,8 @@ export async function writeSet(
 export function prefillFromLastExecution(
   db: Database,
   exerciseId: string,
-): Promise<
-  | {
-      progression_type: ProgressionType;
-      reps: number | null;
-      load_kg: number | null;
-      assisted_load_kg: number | null;
-      seconds: number | null;
-      height_cm: number | null;
-      intent_pct: number | null;
-      difficulty_step: number | null;
-      skill_achieved: number | null;
-      quality: string | null;
-    }
-  | undefined
-> {
-  return db.get(
+): Promise<MeasureRow | undefined> {
+  return db.get<MeasureRow>(
     `SELECT ss.progression_type, ss.reps, ss.load_kg, ss.assisted_load_kg,
             ss.seconds, ss.height_cm, ss.intent_pct, ss.difficulty_step,
             ss.skill_achieved, ss.quality
@@ -478,6 +478,15 @@ export function prefillFromLastExecution(
      ORDER BY ss.timestamp_server DESC LIMIT 1`,
     [exerciseId],
   );
+}
+
+/** A ultima execucao daquele exercicio como SetMeasures (memoria de carga). */
+export async function lastMeasuresFor(
+  db: Database,
+  exerciseId: string,
+): Promise<SetMeasures | undefined> {
+  const row = await prefillFromLastExecution(db, exerciseId);
+  return row !== undefined ? setRowToMeasures(row) : undefined;
 }
 
 // ---------------------------------------------------------------------------
