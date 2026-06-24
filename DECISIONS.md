@@ -360,8 +360,8 @@ npm install --save-dev github:rhashimoto/wa-sqlite#v1.1.1
 versão do app que persiste dados em OPFS no celular, reavaliar entre:
 
 - **(A) manter** `wa-sqlite@1.0.0` / SQLite 3.44.0
-- **(B) trocar** para `github:rhashimoto/wa-sqlite#v1.1.1` / SQLite ~3.45
-  (recomendado pelos bugfixes específicos de WAL/OPFS)
+- **(B) trocar** para `github:rhashimoto/wa-sqlite#v1.1.1` / SQLite **3.53**
+  (bugfixes de WAL/OPFS; o "~3.45" anterior estava errado)
 
 **Não empacotar** produção sobre 1.0.0 sem essa reavaliação. Se você está
 lendo isto e está prestes a fazer build de produção que ativa persistência
@@ -376,6 +376,29 @@ o problema é real.
 **Por que (C) "build do master" está fora:** Emscripten build para
 single-user app é over-engineering da mesma família que rejeitamos em
 CRDT/HLC.
+
+**✅ RESOLVIDO (jun/2026) — gatilho disparou, decisão (A) MANTER 1.0.0:**
+
+O gatilho disparou ao empacotar a P1 (persistência OPFS no iPhone real).
+Decisão: **(A) manter `wa-sqlite@1.0.0`** + `AccessHandlePoolVFS` com
+`DEFAULT_CAPACITY=3` (vendorado). Alternativas descartadas com porquê:
+
+- **B1 (OPFSCoopSyncVFS, via upgrade p/ v1.1.1):** ganho de robustez
+  não-provado; write-overhead maior; o problema do iOS é do WebKit, não do VFS.
+- **B2 (VFS sobre IndexedDB):** o IndexedDB no iOS sofre o mesmo crash do
+  network-process do WebKit (perda/corrupção); refutado como cura.
+
+**Causa-raiz corrigida (a antiga estava ERRADA):** o erro iOS "unknown transient
+reason (out of memory)" NÃO era limite de contagem de handles (o chute
+"iOS limita ~5-6, o VFS pré-aloca 6" nunca foi documentado — limite real daria
+"Invalid platform file handle", ~252/origin). Era (a) pressão de storage do
+WebKit e (b) um `FileSystemSyncAccessHandle` **ÓRFÃO** que sobrevivia ao reload
+e segurava o arquivo (WebKit #301520, aberto no iOS 26). O endurecimento
+(Bloco A) ataca (b): solta os handles ao ir pra background via
+**`worker.terminate()` da main thread** (jeito confiável no iOS — fechar handle
+DENTRO do worker não solta o lock), recupera no boot, e serializa o worker.
+Durabilidade real = flush-por-commit + instalar na Tela de Início + persist() +
+**backup externo** (Bloco B / dump SQL), nunca o VFS sozinho.
 
 ### Dívida 2 — Stubs de engine de deload: baseline circular + constantes sem fundamento
 
