@@ -13,7 +13,7 @@ import { downloadBackup } from "../../data/backup.ts";
 import { useDb } from "../db/DbProvider.tsx";
 import { BlockCard } from "../components/BlockCard.tsx";
 
-export function TodayScreen() {
+export function TodayScreen({ onStart }: { onStart: () => void }) {
   const db = useDb();
   const [blocks, setBlocks] = useState<WorkBlockRow[]>([]);
   const [label, setLabel] = useState("");
@@ -48,6 +48,12 @@ export function TodayScreen() {
     <div className="screen">
       <h1 className="h1">Hoje</h1>
       <p className="sub">{label || "—"}</p>
+
+      <div className="btn-row">
+        <button type="button" className="btn btn-primary" onClick={onStart}>
+          Iniciar treino
+        </button>
+      </div>
 
       {loaded && blocks.length === 0 && (
         <div className="card">

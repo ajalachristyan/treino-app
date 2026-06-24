@@ -50,6 +50,8 @@ export interface SessionItemRow {
   id: string;
   session_id: string;
   exercise_id: string;
+  exercise_name: string;
+  progression_type: ProgressionType;
   work_block_item_id: string | null;
   from_routine_id: string | null;
   actual_sequence: number;
@@ -57,6 +59,22 @@ export interface SessionItemRow {
   deviation_reason: DeviationReason | null;
   data_origin: string;
   is_warmup: number;
+}
+
+export interface SessionSetRow {
+  id: string;
+  set_index: number;
+  progression_type: ProgressionType;
+  reps: number | null;
+  load_kg: number | null;
+  assisted_load_kg: number | null;
+  seconds: number | null;
+  height_cm: number | null;
+  intent_pct: number | null;
+  difficulty_step: number | null;
+  skill_achieved: number | null;
+  quality: string | null;
+  rpe: number | null;
 }
 
 /**
@@ -126,11 +144,52 @@ export function getSessionItems(
   sessionId: string,
 ): Promise<SessionItemRow[]> {
   return db.all<SessionItemRow>(
-    `SELECT id, session_id, exercise_id, work_block_item_id, from_routine_id,
-            actual_sequence, status, deviation_reason, data_origin, is_warmup
-     FROM session_item WHERE session_id = ? ORDER BY actual_sequence`,
+    `SELECT si.id, si.session_id, si.exercise_id, e.name AS exercise_name,
+            e.progression_type, si.work_block_item_id, si.from_routine_id,
+            si.actual_sequence, si.status, si.deviation_reason, si.data_origin,
+            si.is_warmup
+     FROM session_item si JOIN exercise e ON e.id = si.exercise_id
+     WHERE si.session_id = ? ORDER BY si.actual_sequence`,
     [sessionId],
   );
+}
+
+export function getSessionSets(
+  db: Database,
+  sessionItemId: string,
+): Promise<SessionSetRow[]> {
+  return db.all<SessionSetRow>(
+    `SELECT id, set_index, progression_type, reps, load_kg, assisted_load_kg,
+            seconds, height_cm, intent_pct, difficulty_step, skill_achieved,
+            quality, rpe
+     FROM session_set WHERE session_item_id = ? ORDER BY set_index`,
+    [sessionItemId],
+  );
+}
+
+/** Reconstroi as medidas tipadas a partir de uma linha de session_set (recovery). */
+export function setRowToMeasures(row: SessionSetRow): SetMeasures {
+  switch (row.progression_type) {
+    case "load_reps":
+      return { progressionType: "load_reps", reps: row.reps ?? 0, loadKg: row.load_kg ?? 0 };
+    case "isometric_intent":
+      return { progressionType: "isometric_intent", intentPct: row.intent_pct ?? 0 };
+    case "contact_quality":
+      return { progressionType: "contact_quality", quality: (row.quality ?? "stable") as QualityPerSet };
+    case "jump_height":
+      return { progressionType: "jump_height", heightCm: row.height_cm ?? 0 };
+    case "difficulty_tier":
+      return { progressionType: "difficulty_tier", difficultyStep: row.difficulty_step ?? 1 };
+    case "assisted_load":
+      return { progressionType: "assisted_load", assistedLoadKg: row.assisted_load_kg ?? 0, reps: row.reps ?? 0 };
+    case "skill_acquisition":
+      return { progressionType: "skill_acquisition", skillAchieved: row.skill_achieved === 1 };
+    case "time_under_tension":
+      return { progressionType: "time_under_tension", seconds: row.seconds ?? 0 };
+    case "contact_time":
+      // I-6: nao existe session_set contact_time; o tipo so existe por exaustao.
+      throw new Error("setRowToMeasures: contact_time nao tem session_set (I-6).");
+  }
 }
 
 // ---------------------------------------------------------------------------

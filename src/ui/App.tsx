@@ -4,9 +4,11 @@ import { useHashRoute, type Route } from "./router.ts";
 import { TodayScreen } from "./screens/TodayScreen.tsx";
 import { PlanScreen } from "./screens/PlanScreen.tsx";
 import { RoutineScreen } from "./screens/RoutineScreen.tsx";
+import { SessionScreen } from "./screens/SessionScreen.tsx";
 
 const NAV: ReadonlyArray<readonly [Route, string]> = [
   ["hoje", "Hoje"],
+  ["sessao", "Treino"],
   ["plano", "Plano"],
   ["rotina", "Rotinas"],
 ];
@@ -16,7 +18,8 @@ function Shell() {
   return (
     <div className="app">
       <main>
-        {route === "hoje" && <TodayScreen />}
+        {route === "hoje" && <TodayScreen onStart={() => navigate("sessao")} />}
+        {route === "sessao" && <SessionScreen goHome={() => navigate("hoje")} />}
         {route === "plano" && <PlanScreen />}
         {route === "rotina" && <RoutineScreen />}
       </main>

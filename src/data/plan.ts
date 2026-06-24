@@ -43,6 +43,7 @@ export interface WorkBlockItemRow {
   planned_sets: number | null;
   notes: string | null;
   is_warmup: number; // 0/1
+  acute_interference: number; // 0/1 — alimenta o gate I-13
   function_tag: string | null;
 }
 
@@ -124,7 +125,8 @@ export function getWorkBlockItems(
   return db.all<WorkBlockItemRow>(
     `SELECT wbi.id, wbi.exercise_id, e.name AS exercise_name,
             e.progression_type, e.priority, wbi.planned_sequence,
-            wbi.planned_sets, wbi.notes, wbi.is_warmup, e.function_tag
+            wbi.planned_sets, wbi.notes, wbi.is_warmup, e.acute_interference,
+            e.function_tag
      FROM work_block_item wbi
      JOIN exercise e ON e.id = wbi.exercise_id
      WHERE wbi.work_block_id = ?
@@ -138,6 +140,20 @@ export function getAttachableRoutines(db: Database): Promise<RoutineRow[]> {
   return db.all<RoutineRow>(
     `SELECT id, name, attachable, recurring FROM routine
      WHERE attachable = 1 ORDER BY recurring DESC, name`,
+  );
+}
+
+export interface ExerciseRow {
+  id: string;
+  name: string;
+  progression_type: string;
+  function_tag: string | null;
+}
+
+/** Catalogo completo de exercicios (para escolher ad-hoc / substituto). */
+export function getAllExercises(db: Database): Promise<ExerciseRow[]> {
+  return db.all<ExerciseRow>(
+    `SELECT id, name, progression_type, function_tag FROM exercise ORDER BY name`,
   );
 }
 
