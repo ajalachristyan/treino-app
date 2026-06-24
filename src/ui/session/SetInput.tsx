@@ -9,11 +9,15 @@ function NumField({
   value,
   onChange,
   step,
+  min,
+  max,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   step?: string;
+  min?: string;
+  max?: string;
 }) {
   return (
     <label className="field">
@@ -23,6 +27,8 @@ function NumField({
         type="number"
         inputMode="decimal"
         step={step ?? "any"}
+        min={min}
+        max={max}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -48,7 +54,7 @@ export function SetInput({
 }: {
   progressionType: ProgressionType;
   prefill?: SetMeasures | undefined;
-  onSave: (measures: SetMeasures, rpe: number | null) => void;
+  onSave: (measures: SetMeasures, rpe: number | null) => void | Promise<void>;
 }) {
   // Valores iniciais a partir do prefill (memoria de carga).
   const init = (k: string): string => {
@@ -65,6 +71,7 @@ export function SetInput({
     prefill?.progressionType === "skill_acquisition" ? prefill.skillAchieved : null,
   );
   const [rpe, setRpe] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const num = (s: string): number | null => {
     const n = Number(s);
@@ -118,6 +125,9 @@ export function SetInput({
 
   const measures = build();
   const r = num(rpe);
+  // RPE e opcional; se preenchido, precisa estar em 0-10 (CHECK do schema).
+  const rpeValid = rpe.trim() === "" || (r !== null && r >= 0 && r <= 10);
+  const canSave = measures !== null && rpeValid && !saving;
 
   return (
     <div className="setinput">
@@ -172,18 +182,25 @@ export function SetInput({
       )}
 
       <div className="field-row">
-        <NumField label="RPE (opcional)" value={rpe} onChange={setRpe} step="0.5" />
+        <NumField label="RPE 0-10 (opc.)" value={rpe} onChange={setRpe} step="0.5" min="0" max="10" />
         <button
           type="button"
           className="btn btn-primary setinput-save"
-          disabled={measures === null}
-          onClick={() => {
-            if (measures !== null) onSave(measures, r);
+          disabled={!canSave}
+          onClick={async () => {
+            if (measures === null || !rpeValid) return;
+            setSaving(true);
+            try {
+              await onSave(measures, r);
+            } finally {
+              setSaving(false);
+            }
           }}
         >
-          + serie
+          {saving ? "…" : "+ serie"}
         </button>
       </div>
+      {!rpeValid && <p className="field-hint">RPE deve ser de 0 a 10.</p>}
     </div>
   );
 }

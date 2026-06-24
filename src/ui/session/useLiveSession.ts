@@ -1,7 +1,16 @@
 // =============================================================================
 // Hook da sessao ao vivo (Bloco D parte 2). Faz a I/O (persiste cada acao,
-// SEMPRE com await — red team: fire-and-forget perderia a ultima escrita ao ir
-// pra background no iOS) e mantem o estado em memoria (LiveItem[]).
+// SEMPRE com await) e mantem o estado em memoria (LiveItem[]).
+//
+// CONCORRENCIA (red team — bugs de perda de dado): toques rapidos no iPhone
+// disparam acoes antes do setItems re-renderizar. Para nao colidir o
+// UNIQUE(session_id, actual_sequence) nem ler estado velho:
+//   1) `run()` SERIALIZA toda mutacao (uma de cada vez) e CAPTURA erro (surface
+//      em `error` — nada de unhandled rejection invisivel no PWA).
+//   2) `itemsRef` e a fonte fresca (lida dentro da mutacao, nao do closure).
+//   3) `seqRef` da o proximo actual_sequence de forma SINCRONA e monotonica
+//      (sem derivar de items velho) — dois persists nunca pegam a mesma seq.
+//   4) start() so cria UMA sessao (guarda sessionIdRef).
 // =============================================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -44,30 +53,58 @@ export interface LiveSessionApi {
   todayLabel: string;
   items: LiveItem[];
   warning: InterferenceWarning | null;
-  start: () => Promise<void>;
-  resume: () => Promise<void>;
+  error: string | null;
+  start: () => void;
+  resume: () => void;
   logSet: (localKey: string, measures: SetMeasures, rpe: number | null) => Promise<void>;
-  skip: (localKey: string, reason: DeviationReason) => Promise<void>;
-  substitute: (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => Promise<void>;
-  addAdhoc: (ex: ExerciseChoice) => Promise<void>;
-  move: (from: number, to: number) => Promise<void>;
-  finalize: () => Promise<void>;
+  skip: (localKey: string, reason: DeviationReason) => void;
+  substitute: (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => void;
+  addAdhoc: (ex: ExerciseChoice) => void;
+  move: (from: number, to: number) => void;
+  finalize: () => void;
 }
-
-const nowMs = (): number => Date.now();
 
 export function useLiveSession(): LiveSessionApi {
   const db = useDb();
   const [phase, setPhase] = useState<SessionPhase>("checking");
   const [hasActive, setHasActive] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [items, setItems] = useState<LiveItem[]>([]);
   const [warning, setWarning] = useState<InterferenceWarning | null>(null);
   const [todayLabel, setTodayLabel] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  // Guarda contra duplo-persist do MESMO item (ex.: dois toques rapidos no
-  // "salvar serie" de um item planejado criariam duas session_item).
-  const inFlight = useRef<Set<string>>(new Set());
+  const itemsRef = useRef<LiveItem[]>([]);
+  const sessionIdRef = useRef<string | null>(null);
+  const seqRef = useRef(1); // proximo actual_sequence (monotonico)
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+
+  // Atualiza o ref (fresco) E o estado (render) juntos.
+  const commit = useCallback((next: LiveItem[]) => {
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+
+  // Proximo actual_sequence — sincrono (le+incrementa sem await no meio).
+  const takeSeq = useCallback((): number => {
+    const s = seqRef.current;
+    seqRef.current = s + 1;
+    return s;
+  }, []);
+
+  // Serializa qualquer mutacao + captura erro (surface em `error`).
+  const run = useCallback((fn: () => Promise<void>): Promise<void> => {
+    const result = chain.current.then(async () => {
+      try {
+        await fn();
+        setError(null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(`Nao consegui salvar: ${msg}`);
+      }
+    });
+    chain.current = result.catch(() => undefined);
+    return result;
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -81,125 +118,124 @@ export function useLiveSession(): LiveSessionApi {
     };
   }, [db]);
 
-  // Sequencia (actual_sequence) do proximo item persistido = ordem de execucao.
-  const nextSequence = useCallback(
-    (list: readonly LiveItem[]): number =>
-      list.filter((i) => i.sessionItemId !== null).length + 1,
-    [],
-  );
+  const start = useCallback((): void => {
+    void run(async () => {
+      if (sessionIdRef.current !== null) return; // ja iniciada (anti duplo-start)
+      const plan = await getPlan(db);
+      const now = new Date();
+      if (plan === undefined) {
+        const sid = await sessions.startTodaySession(db, { planId: null, workBlockId: null, now: now.getTime() });
+        sessionIdRef.current = sid;
+        seqRef.current = 1;
+        commit([]);
+        setWarning(null);
+        setTodayLabel("Sessao livre");
+        setPhase("active");
+        return;
+      }
+      const phases = await getPhases(db, plan.id);
+      const week = currentWeek(plan, now.getTime());
+      const iso = isoDayOfWeek(now);
+      const blocks = await getPlanBlocksForWeek(db, plan.id, week);
+      const block = blocks.find((b) => b.day_of_week === iso) ?? null;
+      const phaseName = phaseForWeek(phases, week)?.name ?? "";
+      const planned = block ? await getWorkBlockItems(db, block.id) : [];
 
-  const start = useCallback(async () => {
-    const plan = await getPlan(db);
-    const now = new Date();
-    if (plan === undefined) {
-      const sid = await sessions.startTodaySession(db, { planId: null, workBlockId: null, now: now.getTime() });
-      setSessionId(sid);
-      setItems([]);
-      setWarning(null);
-      setTodayLabel("Sessao livre");
-      setPhase("active");
-      return;
-    }
-    const phases = await getPhases(db, plan.id);
-    const week = currentWeek(plan, now.getTime());
-    const iso = isoDayOfWeek(now);
-    const blocks = await getPlanBlocksForWeek(db, plan.id, week);
-    const block = blocks.find((b) => b.day_of_week === iso) ?? null;
-    const phaseName = phaseForWeek(phases, week)?.name ?? "";
-
-    const planned = block ? await getWorkBlockItems(db, block.id) : [];
-    const sid = await sessions.startTodaySession(db, {
-      planId: plan.id,
-      workBlockId: block?.id ?? null,
-      now: now.getTime(),
-    });
-
-    // I-13: gate sobre os itens planejados (avisa, nao bloqueia).
-    const planItems: SessionPlanItem[] = planned.map((p) => ({
-      exerciseId: p.exercise_id,
-      acuteInterference: p.acute_interference === 1,
-      progressionType: p.progression_type,
-      plannedSequence: p.planned_sequence,
-    }));
-    const w = await sessions.applyInterferenceGate(db, sid, planItems);
-
-    setSessionId(sid);
-    setItems(plannedToLiveItems(planned));
-    setWarning(w);
-    setTodayLabel(block ? `Semana ${week} · ${phaseName}` : "Sessao livre (sem bloco hoje)");
-    setPhase("active");
-  }, [db]);
-
-  const resume = useCallback(async () => {
-    const active = await sessions.getActiveSession(db);
-    if (active === undefined) {
-      setPhase("idle");
-      setHasActive(false);
-      return;
-    }
-    const planned = active.work_block_id
-      ? await getWorkBlockItems(db, active.work_block_id)
-      : [];
-    const persisted = await sessions.getSessionItems(db, active.id);
-
-    // Itens persistidos viram LiveItem com seus sets reconstruidos.
-    const persistedLive: LiveItem[] = [];
-    const coveredWbi = new Set<string>();
-    for (const si of persisted) {
-      const setRows = await sessions.getSessionSets(db, si.id);
-      const status =
-        si.status === "added_adhoc"
-          ? ("added" as const)
-          : si.status === "substituted"
-            ? ("substituted" as const)
-            : si.status === "skipped"
-              ? ("skipped" as const)
-              : ("done" as const);
-      if (si.work_block_item_id) coveredWbi.add(si.work_block_item_id);
-      persistedLive.push({
-        localKey: si.id,
-        sessionItemId: si.id,
-        exerciseId: si.exercise_id,
-        exerciseName: si.exercise_name,
-        progressionType: si.progression_type,
-        workBlockItemId: si.work_block_item_id,
-        isWarmup: si.is_warmup === 1,
-        status,
-        sets: setRows.map((r) => ({
-          setIndex: r.set_index,
-          measures: sessions.setRowToMeasures(r),
-          rpe: r.rpe,
-        })),
+      const sid = await sessions.startTodaySession(db, {
+        planId: plan.id,
+        workBlockId: block?.id ?? null,
+        now: now.getTime(),
       });
-    }
-    // Planejados ainda nao tocados ficam como 'planned'.
-    const untouched = plannedToLiveItems(
-      planned.filter((p) => !coveredWbi.has(p.id)),
-    );
+      const planItems: SessionPlanItem[] = planned.map((p) => ({
+        exerciseId: p.exercise_id,
+        acuteInterference: p.acute_interference === 1,
+        progressionType: p.progression_type,
+        plannedSequence: p.planned_sequence,
+      }));
+      const w = await sessions.applyInterferenceGate(db, sid, planItems);
 
-    setSessionId(active.id);
-    setItems([...persistedLive, ...untouched]);
-    setWarning(null);
-    setTodayLabel("Sessao retomada");
-    setPhase("active");
-  }, [db]);
+      sessionIdRef.current = sid;
+      seqRef.current = 1;
+      commit(plannedToLiveItems(planned));
+      setWarning(w);
+      setTodayLabel(block ? `Semana ${week} · ${phaseName}` : "Sessao livre (sem bloco hoje)");
+      setPhase("active");
+    });
+  }, [db, run, commit]);
+
+  const resume = useCallback((): void => {
+    void run(async () => {
+      if (sessionIdRef.current !== null) return; // ja retomada/ativa
+      const active = await sessions.getActiveSession(db);
+      if (active === undefined) {
+        setPhase("idle");
+        setHasActive(false);
+        return;
+      }
+      const planned = active.work_block_id
+        ? await getWorkBlockItems(db, active.work_block_id)
+        : [];
+      const persisted = await sessions.getSessionItems(db, active.id);
+
+      const persistedLive: LiveItem[] = [];
+      const coveredWbi = new Set<string>();
+      let maxSeq = 0;
+      for (const si of persisted) {
+        maxSeq = Math.max(maxSeq, si.actual_sequence);
+        const setRows = await sessions.getSessionSets(db, si.id);
+        const status =
+          si.status === "added_adhoc"
+            ? ("added" as const)
+            : si.status === "substituted"
+              ? ("substituted" as const)
+              : si.status === "skipped"
+                ? ("skipped" as const)
+                : ("done" as const);
+        if (si.work_block_item_id) coveredWbi.add(si.work_block_item_id);
+        persistedLive.push({
+          localKey: si.id,
+          sessionItemId: si.id,
+          exerciseId: si.exercise_id,
+          exerciseName: si.exercise_name,
+          progressionType: si.progression_type,
+          workBlockItemId: si.work_block_item_id,
+          isWarmup: si.is_warmup === 1,
+          status,
+          sets: setRows.map((r) => ({
+            setIndex: r.set_index,
+            measures: sessions.setRowToMeasures(r),
+            rpe: r.rpe,
+          })),
+        });
+      }
+      const untouched = plannedToLiveItems(
+        planned.filter((p) => !coveredWbi.has(p.id)),
+      );
+
+      sessionIdRef.current = active.id;
+      seqRef.current = maxSeq + 1; // proximo seq fica acima de tudo que existe
+      commit([...persistedLive, ...untouched]);
+      setWarning(null);
+      setTodayLabel("Sessao retomada");
+      setPhase("active");
+    });
+  }, [db, run, commit]);
 
   const logSet = useCallback(
-    async (localKey: string, measures: SetMeasures, rpe: number | null) => {
-      const sid = sessionId;
-      if (sid === null || inFlight.current.has(localKey)) return;
-      const item = items.find((i) => i.localKey === localKey);
-      if (item === undefined) return;
-      inFlight.current.add(localKey);
-      try {
-        const now = nowMs();
+    (localKey: string, measures: SetMeasures, rpe: number | null): Promise<void> =>
+      run(async () => {
+        const sid = sessionIdRef.current;
+        if (sid === null) return;
+        const item = itemsRef.current.find((i) => i.localKey === localKey);
+        if (item === undefined) return;
+        const now = Date.now();
         let sessionItemId = item.sessionItemId;
         if (sessionItemId === null) {
           sessionItemId = await sessions.markItemDone(db, {
             sessionId: sid,
             exerciseId: item.exerciseId,
             workBlockItemId: item.workBlockItemId,
-            actualSequence: nextSequence(items),
+            actualSequence: takeSeq(),
             isWarmup: item.isWarmup,
             now,
           });
@@ -207,123 +243,136 @@ export function useLiveSession(): LiveSessionApi {
         const setIndex = item.sets.length + 1;
         await sessions.writeSet(db, { sessionItemId, setIndex, measures, rpe, now });
         const persistedId = sessionItemId;
-        setItems((prev) =>
-          patchItem(prev, localKey, (it) => ({
+        commit(
+          patchItem(itemsRef.current, localKey, (it) => ({
             ...it,
             sessionItemId: persistedId,
             status: it.status === "planned" ? "done" : it.status,
             sets: [...it.sets, { setIndex, measures, rpe }],
           })),
         );
-      } finally {
-        inFlight.current.delete(localKey);
-      }
-    },
-    [db, sessionId, items, nextSequence],
+      }),
+    [db, run, commit, takeSeq],
   );
 
   const skip = useCallback(
-    async (localKey: string, reason: DeviationReason) => {
-      const sid = sessionId;
-      if (sid === null) return;
-      const item = items.find((i) => i.localKey === localKey);
-      if (item === undefined || item.status !== "planned") return;
-      await sessions.skipItem(db, {
-        sessionId: sid,
-        exerciseId: item.exerciseId,
-        workBlockItemId: item.workBlockItemId,
-        actualSequence: nextSequence(items),
-        reason,
-        isWarmup: item.isWarmup,
-        now: nowMs(),
+    (localKey: string, reason: DeviationReason): void => {
+      void run(async () => {
+        const sid = sessionIdRef.current;
+        if (sid === null) return;
+        const item = itemsRef.current.find((i) => i.localKey === localKey);
+        if (item === undefined || item.status !== "planned") return;
+        await sessions.skipItem(db, {
+          sessionId: sid,
+          exerciseId: item.exerciseId,
+          workBlockItemId: item.workBlockItemId,
+          actualSequence: takeSeq(),
+          reason,
+          isWarmup: item.isWarmup,
+          now: Date.now(),
+        });
+        commit(patchItem(itemsRef.current, localKey, (it) => ({ ...it, status: "skipped" })));
       });
-      setItems((prev) =>
-        patchItem(prev, localKey, (it) => ({ ...it, status: "skipped" })),
-      );
     },
-    [db, sessionId, items, nextSequence],
+    [db, run, commit, takeSeq],
   );
 
   const substitute = useCallback(
-    async (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => {
-      const sid = sessionId;
-      if (sid === null) return;
-      const item = items.find((i) => i.localKey === localKey);
-      if (item === undefined || item.workBlockItemId === null) return;
-      const newId = await sessions.substituteItem(db, {
-        sessionId: sid,
-        substituteExerciseId: sub.exerciseId,
-        plannedWorkBlockItemId: item.workBlockItemId,
-        actualSequence: nextSequence(items),
-        reason,
-        isWarmup: item.isWarmup,
-        now: nowMs(),
+    (localKey: string, sub: ExerciseChoice, reason: DeviationReason): void => {
+      void run(async () => {
+        const sid = sessionIdRef.current;
+        if (sid === null) return;
+        const item = itemsRef.current.find((i) => i.localKey === localKey);
+        // So substitui PLANEJADO intocado (anti orfao de session_set).
+        if (item === undefined || item.workBlockItemId === null || item.status !== "planned") return;
+        const newItemId = await sessions.substituteItem(db, {
+          sessionId: sid,
+          substituteExerciseId: sub.exerciseId,
+          plannedWorkBlockItemId: item.workBlockItemId,
+          actualSequence: takeSeq(),
+          reason,
+          isWarmup: item.isWarmup,
+          now: Date.now(),
+        });
+        commit(
+          patchItem(itemsRef.current, localKey, (it) => ({
+            ...it,
+            sessionItemId: newItemId,
+            exerciseId: sub.exerciseId,
+            exerciseName: sub.exerciseName,
+            progressionType: sub.progressionType,
+            status: "substituted",
+            sets: [],
+          })),
+        );
       });
-      setItems((prev) =>
-        patchItem(prev, localKey, (it) => ({
-          ...it,
-          sessionItemId: newId,
-          exerciseId: sub.exerciseId,
-          exerciseName: sub.exerciseName,
-          progressionType: sub.progressionType,
-          status: "substituted",
-          sets: [],
-        })),
-      );
     },
-    [db, sessionId, items, nextSequence],
+    [db, run, commit, takeSeq],
   );
 
   const addAdhoc = useCallback(
-    async (ex: ExerciseChoice) => {
-      const sid = sessionId;
-      if (sid === null) return;
-      const id = await sessions.addAdhocItem(db, {
-        sessionId: sid,
-        exerciseId: ex.exerciseId,
-        actualSequence: nextSequence(items),
-        now: nowMs(),
-      });
-      setItems((prev) => [
-        ...prev,
-        {
-          localKey: id,
-          sessionItemId: id,
+    (ex: ExerciseChoice): void => {
+      void run(async () => {
+        const sid = sessionIdRef.current;
+        if (sid === null) return;
+        const id = await sessions.addAdhocItem(db, {
+          sessionId: sid,
           exerciseId: ex.exerciseId,
-          exerciseName: ex.exerciseName,
-          progressionType: ex.progressionType,
-          workBlockItemId: null,
-          isWarmup: false,
-          status: "added",
-          sets: [],
-        },
-      ]);
+          actualSequence: takeSeq(),
+          now: Date.now(),
+        });
+        commit([
+          ...itemsRef.current,
+          {
+            localKey: id,
+            sessionItemId: id,
+            exerciseId: ex.exerciseId,
+            exerciseName: ex.exerciseName,
+            progressionType: ex.progressionType,
+            workBlockItemId: null,
+            isWarmup: false,
+            status: "added",
+            sets: [],
+          },
+        ]);
+      });
     },
-    [db, sessionId, items, nextSequence],
+    [db, run, commit, takeSeq],
   );
 
   const move = useCallback(
-    async (from: number, to: number) => {
-      const sid = sessionId;
-      const reordered = moveItem(items, from, to);
-      setItems(reordered);
-      const persistedIds = reordered
-        .filter((i) => i.sessionItemId !== null)
-        .map((i) => i.sessionItemId as string);
-      if (sid !== null && persistedIds.length > 0) {
-        await sessions.resequenceItems(db, sid, persistedIds);
-      }
+    (from: number, to: number): void => {
+      void run(async () => {
+        const sid = sessionIdRef.current;
+        const before = itemsRef.current;
+        const reordered = moveItem(before, from, to);
+        commit(reordered);
+        const persistedIds = reordered
+          .filter((i) => i.sessionItemId !== null)
+          .map((i) => i.sessionItemId as string);
+        if (sid !== null && persistedIds.length > 0) {
+          try {
+            await sessions.resequenceItems(db, sid, persistedIds);
+          } catch (e) {
+            commit(before); // reverte o reorder otimista se a persistencia falhar
+            throw e;
+          }
+        }
+      });
     },
-    [db, sessionId, items],
+    [db, run, commit],
   );
 
-  const finalize = useCallback(async () => {
-    const sid = sessionId;
-    if (sid === null) return;
-    await sessions.endSession(db, sid, nowMs());
-    setPhase("ended");
-    setHasActive(false);
-  }, [db, sessionId]);
+  const finalize = useCallback((): void => {
+    void run(async () => {
+      const sid = sessionIdRef.current;
+      if (sid === null) return;
+      await sessions.endSession(db, sid, Date.now());
+      sessionIdRef.current = null;
+      setPhase("ended");
+      setHasActive(false);
+    });
+  }, [db, run]);
 
   return {
     phase,
@@ -331,6 +380,7 @@ export function useLiveSession(): LiveSessionApi {
     todayLabel,
     items,
     warning,
+    error,
     start,
     resume,
     logSet,

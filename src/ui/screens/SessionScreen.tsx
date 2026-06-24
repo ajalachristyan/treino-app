@@ -104,7 +104,7 @@ function ItemCard({
       {!isSkipped && (
         <SetInput
           progressionType={item.progressionType}
-          onSave={(m, rpe) => void api.logSet(item.localKey, m, rpe)}
+          onSave={(m, rpe) => api.logSet(item.localKey, m, rpe)}
         />
       )}
 
@@ -208,6 +208,12 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
             Um exercicio de segurada longa precede um de potencia nesta sessao —
             pode reduzir o salto. So um aviso; voce decide (anti-culpa).
           </p>
+        </div>
+      )}
+
+      {api.error !== null && (
+        <div className="error-box" role="alert">
+          {api.error}
         </div>
       )}
 
