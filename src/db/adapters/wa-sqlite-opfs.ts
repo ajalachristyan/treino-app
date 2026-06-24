@@ -8,15 +8,30 @@
 // "createSyncAccessHandle is not a function" ao rodar na main thread. Por isso
 // este arquivo deixou de ser o engine e virou um PROXY FINO: cria o worker,
 // fala com ele via postMessage RPC, e a interface async Database (adapter.ts)
-// mapeia 1:1 em mensagens. Toda a logica de step/bind/exec/VFS migrou para o
-// worker (mesmas funcoes, mesmos hedges defensivos).
+// mapeia 1:1 em mensagens.
 //
-// D1 (PONTO DE REVISAO — journaling em OPFS): a decisao de WAL/synchronous
-// sobre OPFS e o gatilho de revisao do engine de producao seguem no DECISIONS.md
-// — NAO selados nesta spike. (O worker liga apenas foreign_keys = ON.)
+// ENDURECIMENTO iOS (Bloco A) — release por TERMINATE, nao por close-in-worker:
+// no iOS, se o processo do PWA e morto em background com um SyncAccessHandle
+// aberto, o handle vira ORFAO e bloqueia reabrir/apagar ate REINICIAR o aparelho
+// (a dor central da saga; WebKit #301520, ABERTO no iOS 26). A pesquisa de campo
+// mostra que o jeito CONFIAVEL de soltar o lock no iOS e `worker.terminate()` a
+// partir da main thread — fechar handle DENTRO do worker NAO solta o lock de
+// forma confiavel. Entao:
+//   - release() (lifecycle, ao ir pra background): drena ops em voo e TERMINA o
+//     worker. Isso solta os handles.
+//   - a proxima op recria o worker sozinha (ensureWorker -> reabre a conexao ao
+//     arquivo OPFS que persiste). Recriar e best-effort com a recuperacao no
+//     worker (acquireVfs).
+// release e DEFESA EM PROFUNDIDADE, best-effort (e um RPC/terminate assincrono;
+// o iOS pode matar antes). A durabilidade do dado vem do flush-por-commit do VFS
+// + INSTALAR na tela + persist() + BACKUP EXTERNO (brief 10.5) — nunca do VFS so.
+//
+// D1 (journaling em OPFS): WAL/synchronous seguem no DECISIONS.md (so ligamos
+// foreign_keys = ON). Stack mantida: wa-sqlite 1.0.0 + AccessHandlePoolVFS cap 3.
 // =============================================================================
 
 import type { Database } from "../adapter.ts";
+import { createBusyGate, type BusyGate } from "../concurrency.ts";
 
 // Mensagem enviada ao worker. Espelha RpcRequest do opfs-worker.ts.
 interface RpcRequest {
@@ -45,12 +60,33 @@ interface Pending {
   reject: (reason: Error) => void;
 }
 
+// NOTA Vite: o `new URL("../opfs-worker.ts", import.meta.url)` PRECISA ficar
+// INLINE dentro de cada `new Worker(...)` — se for hoisted para uma constante, o
+// Vite nao detecta o worker estaticamente e nao empacota o wa-sqlite/.wasm (o
+// build "passa" mas emite o worker cru e some o wasm). Por isso ele se repete.
+
 export class WaSqliteOpfsAdapter implements Database {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
+  // Worker vivo, ou null apos release()/close() (recriado lazy em ensureWorker).
+  private worker: Worker | null = null;
+  // Coalesce a recriacao do worker: dois ops concorrentes nao devem criar dois
+  // workers (dois pools disputariam os mesmos arquivos do OPFS).
+  private workerReady: Promise<void> | null = null;
+  // Drena ops em voo antes de terminar o worker — ver concurrency.ts. release()
+  // espera whenIdle() para nao matar o worker no meio de uma escrita/transacao.
+  private readonly gate: BusyGate = createBusyGate();
+  // Release em curso (background): teardown() seta ANTES de drenar e zera no
+  // fim. As ops esperam isto ANTES de contar no gate (beforeOp), para nao postar
+  // para um worker prestes a ser terminado (a janela whenIdle->terminate que o
+  // red team apontou) — senao a ultima escrita antes do background se perderia.
+  private releasing: Promise<void> | null = null;
 
-  private constructor(private readonly worker: Worker) {
-    this.worker.onmessage = (e: MessageEvent<RpcResponse>): void => {
+  private constructor() {}
+
+  /** Liga os handlers de mensagem/erro a um worker recem-criado. */
+  private attach(worker: Worker): void {
+    worker.onmessage = (e: MessageEvent<RpcResponse>): void => {
       const res = e.data;
       const entry = this.pending.get(res.id);
       if (entry === undefined) return; // resposta orfa (nao deveria ocorrer).
@@ -62,34 +98,105 @@ export class WaSqliteOpfsAdapter implements Database {
       }
     };
     // Erro fatal do worker (ex.: falha de carregamento do WASM): rejeita tudo
-    // que estiver pendente, para nenhum await ficar pendurado para sempre.
-    this.worker.onerror = (ev: ErrorEvent): void => {
+    // que estiver pendente e descarta o worker, para nenhum await ficar
+    // pendurado e a proxima op recriar do zero.
+    worker.onerror = (ev: ErrorEvent): void => {
       const err = new Error(`opfs-worker: erro fatal — ${ev.message}`);
+      if (this.worker === worker) {
+        this.worker = null;
+        this.workerReady = null;
+      }
       for (const [, entry] of this.pending) entry.reject(err);
       this.pending.clear();
     };
   }
 
   /**
-   * Envia uma mensagem ao worker e devolve uma Promise resolvida/rejeitada pela
-   * resposta correspondente (casada por id). O worker processa as mensagens em
-   * ordem FIFO — ver a nota de transaction() abaixo.
+   * Envia uma mensagem ao worker atual e devolve uma Promise casada por id. O
+   * worker processa as mensagens numa fila serial (ver opfs-worker.ts), entao
+   * dois handlers nunca interleavam. Rejeita se nao ha worker (chame
+   * ensureWorker antes — as ops publicas fazem isso dentro do gate).
    */
   private rpc<T = unknown>(req: Omit<RpcRequest, "id">): Promise<T> {
+    const worker = this.worker;
+    if (worker === null) {
+      return Promise.reject(
+        new Error("opfs adapter: worker ausente (encerrado por release/close)."),
+      );
+    }
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         resolve: resolve as (value: unknown) => void,
         reject,
       });
-      this.worker.postMessage({ id, ...req } satisfies RpcRequest);
+      worker.postMessage({ id, ...req } satisfies RpcRequest);
     });
+  }
+
+  /**
+   * Espera um release em curso terminar ANTES de a op contar no gate. Fica FORA
+   * do gate.track de proposito: se esperasse DENTRO, o whenIdle() do teardown
+   * (que conta essa op no busy) nunca drenaria -> deadlock. Fora, ou a op espera
+   * o release, ou ja foi contada pelo gate e o release a drena — nunca posta para
+   * o worker zumbi.
+   */
+  private async beforeOp(): Promise<void> {
+    while (this.releasing !== null) await this.releasing;
+  }
+
+  /** Op padrao: espera release pendente, conta no gate, garante worker, envia. */
+  private async op<T>(req: Omit<RpcRequest, "id">): Promise<T> {
+    await this.beforeOp();
+    return this.gate.track(async () => {
+      await this.ensureWorker();
+      return this.rpc<T>(req);
+    });
+  }
+
+  /**
+   * Garante um worker vivo + banco aberto. Recria o worker apos um
+   * release()/close() (que o terminou para soltar os handles no iOS). Coalescido
+   * por workerReady para nao criar dois workers concorrentes.
+   */
+  private async ensureWorker(): Promise<void> {
+    if (this.worker !== null) return;
+    if (this.workerReady === null) {
+      this.workerReady = this.spawnAndOpen().finally(() => {
+        this.workerReady = null;
+      });
+    }
+    await this.workerReady;
+  }
+
+  /**
+   * Cria o worker, liga os handlers e abre a conexao ao arquivo OPFS. Chamado SO
+   * por ensureWorker, que zera o `workerReady` no .finally — este metodo nao o
+   * gerencia (nao chame fora de ensureWorker, ou `workerReady` fica stale).
+   */
+  private async spawnAndOpen(): Promise<void> {
+    const worker = new Worker(new URL("../opfs-worker.ts", import.meta.url), {
+      type: "module",
+    });
+    this.attach(worker);
+    this.worker = worker;
+    try {
+      await this.rpc({ type: "open" });
+    } catch (err) {
+      // Open falhou: desmonta para a proxima tentativa recriar do zero (sem
+      // worker meio-aberto preso). Rejeita o pending e termina.
+      this.worker = null;
+      const fatal = err instanceof Error ? err : new Error(String(err));
+      for (const [, entry] of this.pending) entry.reject(fatal);
+      this.pending.clear();
+      worker.terminate();
+      throw err;
+    }
   }
 
   static async open(path: string): Promise<WaSqliteOpfsAdapter> {
     // O `path` do caller e ignorado para o nome real (o worker fixa o nome do
-    // arquivo em OPFS); mantido na assinatura por paridade com a interface
-    // Database.
+    // arquivo em OPFS); mantido na assinatura por paridade com a interface.
     void path;
 
     // Feature-detect de MAIN THREAD antes de gastar um worker: se nem
@@ -110,26 +217,10 @@ export class WaSqliteOpfsAdapter implements Database {
       );
     }
 
-    // new URL(..., import.meta.url) + { type: "module" } e o padrao suportado
-    // pelo Vite para empacotar o worker como chunk proprio (e o .wasm como
-    // asset). Ver docs do Vite "Web Workers".
-    const worker = new Worker(new URL("../opfs-worker.ts", import.meta.url), {
-      type: "module",
-    });
-
-    const adapter = new WaSqliteOpfsAdapter(worker);
-
+    const adapter = new WaSqliteOpfsAdapter();
     try {
-      await adapter.rpc({ type: "open" });
+      await adapter.ensureWorker();
     } catch (err) {
-      // PRIMEIRO desmonta o worker: rejeita o que sobrou de pending e o
-      // termina, para nenhum await ficar pendurado e nenhum SyncAccessHandle
-      // vazar — DEPOIS classifica o erro.
-      const fatal = err instanceof Error ? err : new Error(String(err));
-      for (const [, entry] of adapter.pending) entry.reject(fatal);
-      adapter.pending.clear();
-      worker.terminate();
-
       if (err instanceof Error && err.message === "OPFS_LOCKED") {
         // Lock genuino: outra aba/instancia ja segura os SyncAccessHandles.
         throw new Error(
@@ -139,28 +230,24 @@ export class WaSqliteOpfsAdapter implements Database {
         );
       }
       if (err instanceof Error && err.message.startsWith("OPFS_INIT_FAILED:")) {
-        // Falha real de init desmascarada pelo worker — SURFACA a causa crua
-        // (antes isso vinha mascarado como "outra aba").
+        // Falha real de init desmascarada pelo worker — SURFACA a causa crua.
         const real = err.message.slice("OPFS_INIT_FAILED:".length).trim();
         throw new Error(
           `OPFS falhou ao abrir: ${real}. Possiveis causas no iPhone: ` +
-            "navegador embutido, modo privado, OPFS nao suportado.",
+            "navegador embutido, modo privado, OPFS nao suportado, ou handle " +
+            "orfao (reinicie o aparelho se persistir).",
           { cause: err },
         );
       }
-      // Qualquer outra coisa (ex.: erro fatal do worker) sobe crua.
       throw err;
     }
-
     return adapter;
   }
 
   /**
    * Probe de capacidades de OPFS, sem efeito colateral. Cria um worker
    * DESCARTAVEL, pede { type:"probe" } (que NAO instancia o VFS nem abre o
-   * banco, para nao bloquear o open real) e SEMPRE o termina no finally. Usado
-   * pelo botao Diagnostico do harness para distinguir "navegador embutido /
-   * sem OPFS" de "banco em outra aba".
+   * banco) e SEMPRE o termina no finally.
    */
   static async probe(): Promise<ProbeResult> {
     const worker = new Worker(new URL("../opfs-worker.ts", import.meta.url), {
@@ -179,24 +266,23 @@ export class WaSqliteOpfsAdapter implements Database {
         worker.postMessage({ id: 1, type: "probe" } satisfies RpcRequest);
       });
     } finally {
-      // Worker descartavel: sempre encerra, deu certo ou nao.
       worker.terminate();
     }
   }
 
   async exec(sql: string): Promise<void> {
-    await this.rpc<void>({ type: "exec", sql });
+    await this.op<void>({ type: "exec", sql });
   }
 
   async run(sql: string, params: readonly unknown[] = []): Promise<void> {
-    await this.rpc<void>({ type: "run", sql, params: params as unknown[] });
+    await this.op<void>({ type: "run", sql, params: params as unknown[] });
   }
 
   async get<T = unknown>(
     sql: string,
     params: readonly unknown[] = [],
   ): Promise<T | undefined> {
-    return this.rpc<T | undefined>({
+    return this.op<T | undefined>({
       type: "get",
       sql,
       params: params as unknown[],
@@ -207,12 +293,12 @@ export class WaSqliteOpfsAdapter implements Database {
     sql: string,
     params: readonly unknown[] = [],
   ): Promise<T[]> {
-    return this.rpc<T[]>({ type: "all", sql, params: params as unknown[] });
+    return this.op<T[]>({ type: "all", sql, params: params as unknown[] });
   }
 
   async pragma(name: string, value?: string | number): Promise<unknown> {
-    // exactOptionalPropertyTypes: so inclui `value` na mensagem se foi passado.
-    return this.rpc<unknown>(
+    // exactOptionalPropertyTypes: so inclui `value` se foi passado.
+    return this.op<unknown>(
       value !== undefined
         ? { type: "pragma", name, value }
         : { type: "pragma", name },
@@ -220,52 +306,103 @@ export class WaSqliteOpfsAdapter implements Database {
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    // IDENTICO em forma ao node adapter: BEGIN ... COMMIT, com ROLLBACK no
-    // catch. Funciona via RPC porque (a) o worker processa as mensagens em
-    // ordem FIFO e (b) este app e single-user e nao-reentrante — nao ha duas
-    // transacoes concorrentes disputando a mesma conexao. Se um dia houver
-    // operacoes concorrentes na mesma conexao, esta suposicao precisa revisao
-    // (igual a nota do node adapter).
-    await this.exec("BEGIN");
-    let result: T;
-    try {
-      result = await fn();
-    } catch (err) {
+    // O gate.track externo mantem busy >= 1 do BEGIN ao COMMIT/ROLLBACK, entao um
+    // release() concorrente (background) espera a transacao terminar antes de
+    // terminar o worker — nunca a corta no meio. BEGIN/COMMIT/ROLLBACK usam rpc
+    // cru; as ops dentro de fn() passam por exec/run/etc (track aninhado).
+    //
+    // Suposicao (single-user, single-tab): nao ha duas transacoes concorrentes
+    // na mesma conexao. O track NAO e mutex — e gate de drenagem; uma op solta
+    // disparada sem await em paralelo a uma transacao poderia interleavar (a
+    // fila serial do worker preserva a ordem de chegada, mas nao agrupa a
+    // transacao). Os call sites (repositorio) sempre fazem await da transacao.
+    await this.beforeOp();
+    return this.gate.track(async () => {
+      await this.ensureWorker();
+      await this.rpc<void>({ type: "exec", sql: "BEGIN" });
+      let result: T;
       try {
-        await this.exec("ROLLBACK");
-      } catch {
-        // ja abortada por constraint; estado consistente.
+        result = await fn();
+      } catch (err) {
+        try {
+          await this.rpc<void>({ type: "exec", sql: "ROLLBACK" });
+        } catch {
+          // ja abortada por constraint; estado consistente.
+        }
+        throw err;
       }
-      throw err;
-    }
-    await this.exec("COMMIT");
-    return result;
+      await this.rpc<void>({ type: "exec", sql: "COMMIT" });
+      return result;
+    });
+  }
+
+  /**
+   * Solta os SyncAccessHandles do OPFS terminando o worker (jeito confiavel no
+   * iOS — WebKit #301520). Chamado pelo lifecycle ao ir pra background, para um
+   * handle nunca vazar se o iOS matar o app. A proxima op recria o worker.
+   *
+   * Best-effort: e assincrono (drena + posta + termina); o iOS pode matar antes.
+   * A durabilidade do dado JA escrito nao depende disto (flush-por-commit +
+   * backup externo). Aqui so prevenimos o handle orfao.
+   */
+  async release(): Promise<void> {
+    await this.teardown(false);
   }
 
   async close(): Promise<void> {
+    await this.teardown(true);
+  }
+
+  /**
+   * Drena ops em voo e termina o worker. `graceful` faz um close logico do banco
+   * antes (flush limpo); release usa false (so termina — mais rapido no
+   * background). Idempotente: se nao ha worker, no-op.
+   */
+  private async teardown(graceful: boolean): Promise<void> {
+    // Coalesce releases concorrentes (ex.: visibilitychange:hidden + pagehide
+    // quase juntos): o 2o espera o 1o terminar.
+    if (this.releasing !== null) return this.releasing;
+
+    let settle!: () => void;
+    this.releasing = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
     try {
-      await this.rpc<void>({ type: "close" });
+      // Drena as ops JA contadas no gate (inclusive uma transacao inteira) antes
+      // de terminar. Ops que cheguem agora veem `releasing` (beforeOp) e esperam
+      // — nenhuma posta para o worker que estamos prestes a terminar.
+      await this.gate.whenIdle();
+      const worker = this.worker;
+      if (worker === null) return;
+      this.workerReady = null;
+      if (graceful) {
+        try {
+          await this.rpc<void>({ type: "close" });
+        } catch {
+          // best-effort: o terminate abaixo solta os handles de qualquer jeito.
+        }
+      }
+      this.worker = null;
+      worker.terminate(); // solta os handles do OPFS de forma confiavel no iOS.
+      for (const [, entry] of this.pending) {
+        entry.reject(new Error("opfs adapter: worker encerrado (release/close)."));
+      }
+      this.pending.clear();
     } finally {
-      // Sempre encerra o worker, mesmo se o close logico falhar — senao o
-      // worker (e os SyncAccessHandles do OPFS) vazam.
-      this.worker.terminate();
+      this.releasing = null;
+      settle();
     }
   }
 
   /**
-   * "Hard reset" da spike: apaga o diretorio do AccessHandlePoolVFS em OPFS.
-   * Best-effort — engole erro se o diretorio nao existir ainda.
-   *
-   * PRECISA do worker FECHADO (sem SyncAccessHandles vivos): remover o
-   * diretorio enquanto o VFS o segura colide. O harness (App.tsx) abre/fecha o
-   * banco por acao e instrui recarregar a pagina apos o reset — o que descarta
-   * o worker e libera os handles. Por isso este metodo NAO precisa de um worker
-   * proprio: opera direto na OPFS pela main thread (removeEntry e main-thread).
+   * "Hard reset": apaga o diretorio do AccessHandlePoolVFS em OPFS. Best-effort.
+   * PRECISA do worker FECHADO (sem SyncAccessHandles vivos) — chame close()/
+   * release() antes, ou recarregue a pagina. Opera direto na OPFS pela main
+   * thread (removeEntry e main-thread).
    */
   static async deleteDatabase(): Promise<void> {
     const root = await navigator.storage.getDirectory();
     try {
-      // removeEntry nao aceita "/" no nome; usa o nome do diretorio sem a barra.
       await root.removeEntry("treino-opfs", { recursive: true });
     } catch {
       // diretorio inexistente ou ja removido — no-op.

@@ -14,17 +14,21 @@
 // continua expondo step/exec como Promise (o Factory envolve), mas o VFS por
 // baixo nao precisa do Asyncify.
 //
-// D1 (PONTO DE REVISAO — journaling em OPFS): NAO ligamos WAL/synchronous as
-// cegas aqui. O AccessHandlePoolVFS tem caracteristicas proprias de journaling
-// (arquivos de journal/WAL vivem no mesmo diretorio flat). A decisao de modo de
-// journal sobre OPFS e o gatilho de revisao do engine de producao estao no
-// DECISIONS.md — NAO selar nesta spike.
+// FILA SERIAL (Bloco A / red team): o self.onmessage e async, entao SEM
+// serializar dois handlers interleavariam nos `await` — uma op poderia rodar com
+// o banco meio-reaberto por outra. Encadeamos cada mensagem numa fila (workQueue
+// no fim): handleMessage(N+1) so comeca quando handleMessage(N) termina por
+// completo. Cada RPC vira atomico em relacao aos outros.
 //
-// PROPAGACAO DE ERRO: identica ao node adapter — o Factory envolve `step` e
-// dispara em rc de erro; os `if (rc !== SQLITE_DONE) throw` sao hedge defensivo
-// (falha LOUD se algum rc obscuro escapar). O onmessage abaixo captura qualquer
-// throw e o devolve como { ok:false, error } para o proxy rejeitar — incluindo
-// o canario de CHECK violation.
+// RELEASE iOS por TERMINATE (nao aqui): liberar handle em background no iOS e
+// feito pelo PROXY com worker.terminate() (jeito confiavel — WebKit #301520);
+// este worker nao tem mensagem de "release". doClose() so faz um close logico do
+// banco (flush) antes do terminate. WAL/synchronous seguem no DECISIONS.md (D1).
+//
+// PROPAGACAO DE ERRO: o Factory envolve `step` e dispara em rc de erro; os
+// `if (rc !== SQLITE_DONE) throw` sao hedge defensivo (falha LOUD se algum rc
+// obscuro escapar). handleMessage captura qualquer throw e devolve { ok:false }
+// para o proxy rejeitar — incluindo o canario de CHECK violation.
 // =============================================================================
 
 import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
@@ -32,6 +36,7 @@ import * as SQLite from "wa-sqlite";
 // VENDORADO (capacity 3) — ver ./vendor/AccessHandlePoolVFS.js e o cabecalho de doOpen.
 import { AccessHandlePoolVFS } from "./vendor/AccessHandlePoolVFS.js";
 import wasmUrl from "wa-sqlite/dist/wa-sqlite.wasm?url";
+import { createSerialQueue } from "./concurrency.ts";
 
 const SQLITE_ROW = 100;
 const SQLITE_DONE = 101;
@@ -63,21 +68,17 @@ interface WaSqliteApi {
   vfs_register(vfs: unknown, makeDefault?: boolean): number;
 }
 
-// O Factory do WASM + o AccessHandlePoolVFS sao criados e registrados UMA vez
-// por worker (singleton), NAO a cada open(). Motivo: o VFS adquire
-// SyncAccessHandles EXCLUSIVOS do OPFS e os mantem pelo tempo de vida do worker
-// — close() fecha a CONEXAO, nao devolve os handles do VFS. Como ha um worker
-// por aba, isso espelha o "singleton por pagina" da versao antiga (e o cachedApi
-// do wa-sqlite-node.ts). Mantemos UMA conexao (dbHandle) viva entre mensagens.
-// doClose() zera estes campos apos fechar, para que um 'open' subsequente no
-// MESMO worker (caso ele nao seja terminado) reinicialize do zero em vez de
-// reusar uma conexao morta.
+// Conexao viva (factory + VFS + dbHandle), criada UMA vez por worker e mantida
+// entre mensagens. O VFS adquire SyncAccessHandles EXCLUSIVOS e os mantem pelo
+// tempo de vida do worker — close() fecha a CONEXAO, nao devolve os handles (so
+// terminar o worker devolve, no iOS). doClose() zera estes campos para que um
+// 'open' subsequente reinicialize do zero em vez de reusar conexao morta.
 let sqlite3: WaSqliteApi | null = null;
 let dbHandle: number | null = null;
 
 // -----------------------------------------------------------------------------
-// Helpers de execucao — copiados VERBATIM do antigo wa-sqlite-opfs.ts, agora
-// operando no sqlite3/dbHandle locais do worker (ver getDb()).
+// Helpers de execucao — operam no sqlite3/dbHandle locais do worker (ver
+// ensureOpen, que abre o banco sob demanda).
 // -----------------------------------------------------------------------------
 
 function getDb(): { sqlite3: WaSqliteApi; dbHandle: number } {
@@ -85,6 +86,16 @@ function getDb(): { sqlite3: WaSqliteApi; dbHandle: number } {
     throw new Error("opfs-worker: banco nao aberto (envie 'open' primeiro).");
   }
   return { sqlite3, dbHandle };
+}
+
+// Garante o banco aberto antes de qualquer op. NAO precisa coalescing: a fila
+// serial (onmessage/workQueue) ja garante que dois doOpen nunca rodem
+// concorrentes. O check de idempotencia em doOpen e belt-and-suspenders.
+async function ensureOpen(): Promise<{ sqlite3: WaSqliteApi; dbHandle: number }> {
+  if (sqlite3 === null || dbHandle === null) {
+    await doOpen();
+  }
+  return getDb();
 }
 
 function bindAll(api: WaSqliteApi, stmt: number, params: readonly unknown[]): void {
@@ -104,12 +115,12 @@ function rowToObject<T>(api: WaSqliteApi, stmt: number): T {
 }
 
 async function doExec(sql: string): Promise<void> {
-  const { sqlite3: api, dbHandle: db } = getDb();
+  const { sqlite3: api, dbHandle: db } = await ensureOpen();
   await api.exec(db, sql);
 }
 
 async function doRun(sql: string, params: readonly unknown[] = []): Promise<void> {
-  const { sqlite3: api, dbHandle: db } = getDb();
+  const { sqlite3: api, dbHandle: db } = await ensureOpen();
   for await (const stmt of api.statements(db, sql)) {
     bindAll(api, stmt, params);
     const rc = await api.step(stmt);
@@ -128,7 +139,7 @@ async function doGet<T = unknown>(
   sql: string,
   params: readonly unknown[] = [],
 ): Promise<T | undefined> {
-  const { sqlite3: api, dbHandle: db } = getDb();
+  const { sqlite3: api, dbHandle: db } = await ensureOpen();
   let result: T | undefined = undefined;
   for await (const stmt of api.statements(db, sql)) {
     bindAll(api, stmt, params);
@@ -152,7 +163,7 @@ async function doAll<T = unknown>(
   sql: string,
   params: readonly unknown[] = [],
 ): Promise<T[]> {
-  const { sqlite3: api, dbHandle: db } = getDb();
+  const { sqlite3: api, dbHandle: db } = await ensureOpen();
   const rows: T[] = [];
   for await (const stmt of api.statements(db, sql)) {
     bindAll(api, stmt, params);
@@ -176,7 +187,7 @@ async function doPragma(
   name: string,
   value?: string | number,
 ): Promise<unknown> {
-  const { sqlite3: api, dbHandle: db } = getDb();
+  const { sqlite3: api, dbHandle: db } = await ensureOpen();
   if (value !== undefined) {
     await api.exec(db, `PRAGMA ${name} = ${value}`);
     return undefined;
@@ -189,21 +200,50 @@ async function doPragma(
 }
 
 // -----------------------------------------------------------------------------
-// Init lazy do engine (factory + VFS + conexao). So roda na 1a mensagem 'open'.
+// Init do engine (factory + VFS + conexao). Roda na 1a 'open' E em qualquer op
+// depois que o worker for recriado (o proxy termina o worker no release de
+// background) — por isso e idempotente.
 //
-// CAPACITY REDUZIDA (correcao do erro iOS "unknown transient reason"): o iOS
-// Safari limita ~5-6 FileSystemSyncAccessHandles simultaneos. O AccessHandlePool
-// VFS padrao pre-aloca 6 no isReady — no limite do iOS, estoura. Usamos o VFS
-// VENDORADO (./vendor/AccessHandlePoolVFS.js) com DEFAULT_CAPACITY=3 (1 conexao
-// rollback-journal usa db+journal, ~2), bem abaixo do limite.
+// CAPACITY 3 (VFS vendorado): mantida por baixo custo, mas a causa-raiz do erro
+// iOS "unknown transient reason" NAO era contagem de handle (isso daria "Invalid
+// platform file handle"). Era (a) pressao de storage do WebKit e (b) um
+// FileSystemSyncAccessHandle ORFAO que sobrevivia ao reload e segurava o arquivo
+// (bloqueando reabrir E removeEntry; WebKit #301520, aberto no iOS 26). O
+// endurecimento ataca (b) liberando os handles via worker.terminate() no proxy
+// ao ir pra background, e recupera no boot via acquireVfs.
 //
-// SEM RETRY de proposito: retentar recriando o VFS NO MESMO worker so PIORAVA —
-// cada tentativa que falha deixa handles presos (nao ha release publico; GC nao
-// e imediato) que colidem com a tentativa seguinte. Com capacity 3, uma
-// tentativa limpa basta. Se ainda falhar no device, a escalada e trocar de VFS
-// (OPFSCoopSyncVFS, handles lazy/cooperativos) via upgrade do wa-sqlite — Divida
-// D1. (Confirmado por leitura do source: OPFSCoopSyncVFS NAO exige COOP/COEP.)
+// RECUPERACAO != o retry-em-loop que antes PIORAVA: aquele recriava o VFS SEM
+// liberar os handles presos, que colidiam com a tentativa seguinte. acquireVfs
+// chama pool.close() ANTES de tentar de novo (solta o que pegou) e tenta UMA
+// vez. Se ainda falhar, o handle e de um processo morto que o iOS nao soltou (so
+// reiniciar o aparelho resolve); propagamos com a causa crua.
 // -----------------------------------------------------------------------------
+
+async function acquireVfs(): Promise<AccessHandlePoolVFS> {
+  const pool = new AccessHandlePoolVFS(OPFS_DIR);
+  try {
+    await pool.isReady;
+    return pool;
+  } catch (firstErr) {
+    console.warn(
+      "opfs-worker: acquire inicial do VFS falhou, tentando recuperar:",
+      firstErr,
+    );
+    try {
+      // Solta o que esta instancia pegou no acquire parcial. RESIDUAL (red team
+      // N1): um createSyncAccessHandle que so resolva DEPOIS do Promise.all
+      // rejeitar fica fora dos mapas e nao e fechado aqui — viraria orfao. Baixa
+      // probabilidade; o retry abaixo colide LOUD nesse arquivo (nao corrompe),
+      // e o fallback ultimo e reiniciar o aparelho.
+      await pool.close();
+    } catch {
+      // best-effort: se nem fechar der, o retry abaixo ainda pode falhar LOUD.
+    }
+    const retry = new AccessHandlePoolVFS(OPFS_DIR);
+    await retry.isReady; // se falhar de novo, propaga (travado de verdade).
+    return retry;
+  }
+}
 
 async function doOpen(): Promise<void> {
   if (sqlite3 !== null && dbHandle !== null) return; // idempotente
@@ -212,10 +252,9 @@ async function doOpen(): Promise<void> {
   const api = SQLite.Factory(module) as WaSqliteApi;
 
   // createSyncAccessHandle so funciona AQUI (no worker). O pool (capacity 3 no
-  // VFS vendorado) e adquirido dentro de isReady.
-  const vfs = new AccessHandlePoolVFS(OPFS_DIR);
-  await vfs.isReady;
-  api.vfs_register(vfs, true); // makeDefault => open_v2 sem vfs usa este.
+  // VFS vendorado) e adquirido dentro de isReady, com recuperacao (acquireVfs).
+  const pool = await acquireVfs();
+  api.vfs_register(pool, true); // makeDefault => open_v2 sem vfs usa este.
 
   const handle = await api.open_v2(DB_FILENAME);
 
@@ -227,21 +266,19 @@ async function doOpen(): Promise<void> {
   dbHandle = handle;
 }
 
+// Close LOGICO do banco (flush + finaliza). Chamado pelo proxy antes de terminar
+// o worker — quem realmente devolve os handles ao SO no iOS e o terminate(). Por
+// isso NAO tentamos vfs.close() aqui (in-worker close nao solta o lock de forma
+// confiavel — WebKit #301520). Idempotente.
 async function doClose(): Promise<void> {
   if (sqlite3 !== null && dbHandle !== null) {
     try {
       await sqlite3.close(dbHandle);
     } catch (closeErr) {
-      // Loga e segue: mesmo se o close logico falhar, zeramos os globais
-      // abaixo para nao deixar estado stale.
+      // Loga e segue: zeramos os globais abaixo para nao deixar estado stale.
       console.error("opfs-worker: falha no close do banco:", closeErr);
     }
   }
-  // Zera os globais do singleton: normalmente o proxy chama terminate() logo
-  // apos o close (descartando o worker inteiro), mas se o worker NAO for
-  // terminado, zerar aqui evita reusar uma conexao ja fechada (estado stale) —
-  // um 'open' subsequente reinicializa do zero (doOpen e idempotente so quando
-  // ambos os campos estao setados).
   sqlite3 = null;
   dbHandle = null;
 }
@@ -294,15 +331,16 @@ function doProbe(): ProbeResult {
   };
 }
 
-self.onmessage = async (e: MessageEvent<RpcRequest>): Promise<void> => {
-  const msg = e.data;
+// Processa UMA mensagem. NAO e ligado direto ao onmessage: passa pela fila
+// serial (workQueue, abaixo) para nunca interleavar com outro handler nos await.
+async function handleMessage(msg: RpcRequest): Promise<void> {
   const { id, type } = msg;
   try {
     let result: unknown;
     switch (type) {
       case "open":
         try {
-          await doOpen();
+          await ensureOpen();
         } catch (openErr) {
           // Loga a causa real no console do worker para depuracao (sempre).
           console.error("opfs-worker: falha ao abrir o OPFS:", openErr);
@@ -361,4 +399,13 @@ self.onmessage = async (e: MessageEvent<RpcRequest>): Promise<void> => {
     const message = err instanceof Error ? err.message : String(err);
     self.postMessage({ id, ok: false, error: message });
   }
+}
+
+// FILA SERIAL: encadeia cada mensagem para que handleMessage(N+1) so comece
+// quando handleMessage(N) terminar por completo (todos os await + postMessage).
+// Sem isto, dois handlers async interleavariam nos await (ver cabecalho).
+const enqueueMessage = createSerialQueue();
+self.onmessage = (e: MessageEvent<RpcRequest>): void => {
+  const msg = e.data;
+  void enqueueMessage(() => handleMessage(msg));
 };

@@ -284,7 +284,14 @@ export class AccessHandlePoolVFS extends VFS.Base {
 
   #releaseAccessHandles() {
     for (const accessHandle of this.#mapAccessHandleToName.keys()) {
-      accessHandle.close();
+      // VENDORADO (Bloco A / red team N2): try/catch por handle para que um
+      // close() que lance nao aborte o loop e pule os clear() abaixo — isso
+      // deixaria handles abertos E os mapas populados (handle orfao).
+      try {
+        accessHandle.close();
+      } catch (e) {
+        console.error('AccessHandlePoolVFS: falha ao fechar handle:', e);
+      }
     }
     this.#mapAccessHandleToName.clear();
     this.#mapPathToAccessHandle.clear();
