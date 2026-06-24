@@ -4,7 +4,12 @@ import type { Database } from "./adapter.ts";
 import { BetterSqlite3Adapter } from "./adapters/better-sqlite3.ts";
 import { WaSqliteNodeAdapter } from "./adapters/wa-sqlite-node.ts";
 import { applyMigrations, currentSchemaVersion } from "./runner.ts";
-import { loadMigrations } from "./migrations.ts";
+import { loadMigrations, MIGRATION_MANIFEST } from "./migrations.ts";
+
+// A ultima versao registrada no manifesto (robusto a novas migrations, ex.: o
+// seed 002 — antes estes testes cravavam "1").
+const LATEST_VERSION =
+  MIGRATION_MANIFEST[MIGRATION_MANIFEST.length - 1]?.version ?? 0;
 
 // ============================================================================
 // LEVA 1 do Passo 5 — INFRAESTRUTURA DE TESTE.
@@ -68,14 +73,14 @@ describe.each(engines)("db adapter + runner — %s", (_engineName, openDb) => {
   });
 
   // ===========================================================================
-  // 1. Zero -> v1: aplicar do zero leva o banco a versao 1.
+  // 1. Zero -> ultima versao: aplicar do zero migra o banco ate o topo.
   // ===========================================================================
-  it("apply from empty db brings schema to version 1", async () => {
+  it("apply from empty db brings schema to the latest manifest version", async () => {
     expect(await currentSchemaVersion(db)).toBe(0);
 
     await applyMigrations(db, loadMigrations);
 
-    expect(await currentSchemaVersion(db)).toBe(1);
+    expect(await currentSchemaVersion(db)).toBe(LATEST_VERSION);
 
     const tables = await db.all<{ name: string }>(
       `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`,
@@ -102,9 +107,9 @@ describe.each(engines)("db adapter + runner — %s", (_engineName, openDb) => {
       `SELECT version FROM schema_version`,
     );
 
-    expect(versionsAfterFirst).toHaveLength(1);
-    expect(versionsAfterSecond).toHaveLength(1);
-    expect(await currentSchemaVersion(db)).toBe(1);
+    expect(versionsAfterFirst).toHaveLength(MIGRATION_MANIFEST.length);
+    expect(versionsAfterSecond).toHaveLength(MIGRATION_MANIFEST.length);
+    expect(await currentSchemaVersion(db)).toBe(LATEST_VERSION);
   });
 
   // ===========================================================================

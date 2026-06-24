@@ -30,4 +30,5 @@ export interface MigrationManifestEntry {
 
 export const MIGRATION_MANIFEST: ReadonlyArray<MigrationManifestEntry> = [
   { version: 1, name: "001_init" },
+  { version: 2, name: "002_seed_plan" },
 ] as const;

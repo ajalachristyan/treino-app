@@ -67,36 +67,44 @@ describe.each(engines)("dumpDatabase round-trip — %s", (_name, openDb) => {
     // Mesmas tabelas, indices e triggers do schema original.
     expect(await schemaObjects(db2)).toEqual(await schemaObjects(db));
 
-    const ver = await db2.get<{ v: number }>(
-      "SELECT MAX(version) AS v FROM schema_version",
-    );
-    expect(ver?.v).toBe(1);
+    // O dump preserva o schema_version do original (seja qual for a ultima
+    // migration — hoje o seed 002 leva a 2).
+    const maxVer = (d: Database): Promise<{ v: number } | undefined> =>
+      d.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version");
+    expect((await maxVer(db2))?.v).toBe((await maxVer(db))?.v);
   });
 
   it("dump de uma tabela com dados preserva as linhas (count + conteudo)", async () => {
     await applyMigrations(db, loadMigrations);
     // exercise tem progression_type imutavel + colunas variadas; insere 2 linhas
     // validas para provar que dados reais (nao so schema) atravessam o round-trip.
+    // IDs proprios (prefixo zz_, nao colidem com o seed). O banco ja vem com o
+    // seed (002), entao a tabela tem seed + estes 2; o round-trip preserva TODOS.
     await db.run(
       `INSERT INTO exercise
         (id, name, progression_type, priority, load_type, acute_interference, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ["ex_a", "Back squat 'pesado'", "load_reps", "primary", "barbell", 0, 1700000000000],
+      ["zz_test_a", "Back squat 'pesado'", "load_reps", "primary", "barbell", 0, 1700000000000],
     );
     await db.run(
       `INSERT INTO exercise
         (id, name, progression_type, priority, load_type, acute_interference, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ["ex_b", "Couch stretch", "time_under_tension", "accessory", "bodyweight", 1, 1700000000000],
+      ["zz_test_b", "Couch stretch", "time_under_tension", "accessory", "bodyweight", 1, 1700000000000],
     );
 
     const sql = await dumpDatabase(db);
     await db2.exec(sql);
 
+    // Round-trip fiel de TODA a tabela (seed + os 2 de teste), na mesma ordem.
     const original = await db.all("SELECT * FROM exercise ORDER BY id");
     const restored = await db2.all("SELECT * FROM exercise ORDER BY id");
     expect(restored).toEqual(original);
-    expect(restored).toHaveLength(2);
+    // E os 2 inseridos sobrevivem especificamente.
+    const restoredTest = await db2.all<{ id: string }>(
+      "SELECT id FROM exercise WHERE id LIKE 'zz_test_%' ORDER BY id",
+    );
+    expect(restoredTest.map((r) => r.id)).toEqual(["zz_test_a", "zz_test_b"]);
   });
 });
 
