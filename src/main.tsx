@@ -1,14 +1,16 @@
 // =============================================================================
-// Ponto de entrada do harness da spike de persistencia (Fase 0). Monta o React
-// e registra o service worker do vite-plugin-pwa (registerType: 'prompt' — o
-// fluxo de update e explicito; aqui so registramos, sem UI de prompt nesta
-// spike descartavel).
+// Ponto de entrada do app (P1). Monta o React e registra o service worker do
+// vite-plugin-pwa (registerType: 'prompt' — fluxo de update explicito).
+//
+// O harness da spike (src/App.tsx) fica no repo para debug de OPFS no device,
+// mas NAO e mais importado (tree-shaken do bundle). A UI real vive em src/ui/.
 // =============================================================================
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { App } from "./App.tsx";
+import "./ui/tokens.css";
+import { App } from "./ui/App.tsx";
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
