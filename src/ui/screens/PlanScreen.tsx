@@ -15,8 +15,10 @@ import { BlockCard } from "../components/BlockCard.tsx";
 
 export function PlanScreen({
   onOpenExercise,
+  onEdit,
 }: {
   onOpenExercise: (exerciseId: string) => void;
+  onEdit: () => void;
 }) {
   const db = useDb();
   const [plan, setPlan] = useState<PlanRow | null>(null);
@@ -96,6 +98,12 @@ export function PlanScreen({
             {w}
           </button>
         ))}
+      </div>
+
+      <div className="btn-row plan-edit-row">
+        <button type="button" className="btn" onClick={onEdit}>
+          Editar plano
+        </button>
       </div>
 
       {blocks.map((b) => (

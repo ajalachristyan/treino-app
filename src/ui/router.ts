@@ -10,6 +10,7 @@ export const ROUTES = [
   "rotina",
   "exercicios",
   "ajustes",
+  "editar",
 ] as const;
 export type Route = (typeof ROUTES)[number];
 

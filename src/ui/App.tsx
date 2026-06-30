@@ -9,6 +9,7 @@ import { SessionScreen } from "./screens/SessionScreen.tsx";
 import { AjustesScreen } from "./screens/AjustesScreen.tsx";
 import { ExerciseLibraryScreen } from "./screens/ExerciseLibraryScreen.tsx";
 import { ExerciseDetailScreen } from "./screens/ExerciseDetailScreen.tsx";
+import { PlanEditorScreen } from "./screens/PlanEditorScreen.tsx";
 
 const NAV: ReadonlyArray<readonly [Route, string]> = [
   ["hoje", "Hoje"],
@@ -35,8 +36,16 @@ function Shell() {
           />
         )}
         {loc.name === "sessao" && <SessionScreen goHome={() => navigate("hoje")} />}
-        {loc.name === "plano" && <PlanScreen onOpenExercise={openExercise} />}
+        {loc.name === "plano" && (
+          <PlanScreen
+            onOpenExercise={openExercise}
+            onEdit={() => navigate("editar")}
+          />
+        )}
         {loc.name === "rotina" && <RoutineScreen onOpenExercise={openExercise} />}
+        {loc.name === "editar" && (
+          <PlanEditorScreen onDone={() => navigate("plano")} />
+        )}
         {loc.name === "exercicios" && (
           <ExerciseLibraryScreen onOpenExercise={openExercise} />
         )}

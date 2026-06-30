@@ -557,3 +557,51 @@ button {
   padding-top: var(--sp-1);
   padding-bottom: var(--sp-1);
 }
+
+/* =============================================================================
+   Editor de plano (Bloco 3)
+   ============================================================================= */
+.plan-edit-row {
+  margin-bottom: var(--sp-4);
+}
+.edit-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+.edit-item:first-of-type {
+  border-top: none;
+}
+.edit-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.edit-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  align-items: center;
+  font-size: 11px;
+}
+.edit-sets-input {
+  width: 56px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
+  font-size: 16px;
+  text-align: center;
+  min-height: 40px;
+}
+.iconbtn-danger {
+  color: var(--danger-soft);
+  border-color: var(--warn-border);
+  font-size: 22px;
+}
+.add-ex {
+  margin-top: var(--sp-3);
+}
