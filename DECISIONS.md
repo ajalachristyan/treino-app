@@ -654,3 +654,49 @@ O teste do seed passou de `MAX(version)=2` para `version=2 WHERE ...` (afere a
 linha do seed, não o topo do `schema_version`) — necessário para não travar
 quando migrations posteriores (003+) sobem a versão. Tecnicamente correto; mexe
 num teste de invariante e fica registrado aqui.
+
+---
+
+## §H. Bloco 3 — editor de plano (edição da prescrição no app)
+
+Rodada "terminar o app" (jun/2026). O brief §10.2 já previa uma tela de edição de
+plano SEPARADA do treino ao vivo; aqui ela existe (`PlanEditorScreen` +
+`src/data/planEditor.ts`). Camada de dados red-teamada (revisor-treino +
+adversário) e smoke-testada no Chrome.
+
+### H1 — "plano = verdade atual"; identidade do exercício planejado imutável (I-15 estrutural)
+
+**Decisão.** O editor mexe no plano ATUAL. Mudar `planned_sets`/ordem afeta só a
+leitura reconstruída (modelo LAZY) de sessões antigas — aceitável: o histórico
+guarda `actual_sequence` e recupera o exercício planejado por `work_block_item_id`
+(por id), não pela ordem. PROIBIDO é corromper a recuperação I-15: o
+`work_block_item.exercise_id` de um item já referenciado por `session_item` nunca
+muda.
+
+**Por que estrutural, não só convenção.** `exercise.progression_type` é imutável
+por trigger (I-10-derivado). Por simetria, `work_block_item.exercise_id` ganhou o
+mesmo tratamento na `migrations/006`: um trigger `BEFORE UPDATE OF exercise_id`
+com `RAISE(ABORT)`. A regra "o planejado nunca é reescrito retroativamente" passa
+a ser garantida pelo banco, não por um regex de teste (o red team apontou a
+assimetria: I-15 dependia de checagem léxica). A API do editor não tem "trocar
+exercício do item" — **trocar = remover + adicionar**.
+
+### H2 — soft-discontinue (`migrations/006`: coluna `active`)
+
+**Decisão.** Remover um item já tocado por sessão → `active=0` (descontinuado,
+preservado); item nunca tocado → `DELETE`. A FK (`session_item.work_block_item_id`,
+sem ON DELETE) já barraria apagar um referenciado; o `active` torna a remoção
+explícita e reversível.
+
+**Leitura.** `getWorkBlockItems` (plano atual + semeadura de sessões novas) filtra
+`active=1`; a recuperação de histórico (por id) NÃO filtra — pega a linha
+específica, ativa ou não. `reorderActive` renumera em 2 fases (offset alto) para
+não colidir no `UNIQUE(work_block_id, planned_sequence)`, inclusive com itens
+descontinuados no bloco.
+
+### H3 — escopo enxuto do catálogo
+
+`updateExerciseText` edita só `name`/`how_to`/`video_url`/`category` (texto e
+navegação). `progression_type` (trigger), `function_tag`, `load_type`, `rep_*`
+ficam de fora: mudam a interpretação do histórico pela engine — o repropósito
+correto é criar outro exercício, não reescrever a identidade científica.

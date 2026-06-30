@@ -129,7 +129,7 @@ export function getWorkBlockItems(
             e.function_tag
      FROM work_block_item wbi
      JOIN exercise e ON e.id = wbi.exercise_id
-     WHERE wbi.work_block_id = ?
+     WHERE wbi.work_block_id = ? AND wbi.active = 1
      ORDER BY wbi.planned_sequence`,
     [workBlockId],
   );
