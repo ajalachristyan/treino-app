@@ -40,8 +40,10 @@ describe.each(engines)("absences (faltas) — %s", (_name, openDb) => {
       "SELECT name FROM sqlite_master WHERE type='table' AND name='missed_session'",
     );
     expect(t?.name).toBe("missed_session");
+    // Afere que a 003 foi aplicada (a linha existe), nao que e o topo do
+    // schema_version — migrations posteriores (004+) sobem o MAX.
     const v = await db.get<{ v: number }>(
-      "SELECT MAX(version) AS v FROM schema_version",
+      "SELECT version AS v FROM schema_version WHERE version = 3",
     );
     expect(v?.v).toBe(3);
   });
