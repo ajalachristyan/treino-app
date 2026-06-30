@@ -475,3 +475,8 @@ button {
   font-size: 16px;
   cursor: pointer;
 }
+
+/* ---- Ajustes do plano (P2.5) --------------------------------------------- */
+.actions {
+  margin-top: var(--sp-3);
+}

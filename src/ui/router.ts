@@ -1,7 +1,7 @@
 // Hash router minimo (sem dependencia). Rotas: #/hoje, #/plano, #/rotina.
 import { useEffect, useState } from "react";
 
-export const ROUTES = ["hoje", "plano", "rotina", "sessao"] as const;
+export const ROUTES = ["hoje", "plano", "rotina", "sessao", "ajustes"] as const;
 export type Route = (typeof ROUTES)[number];
 
 function parseHash(): Route {
