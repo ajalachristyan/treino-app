@@ -13,7 +13,11 @@ import {
 import { useDb } from "../db/DbProvider.tsx";
 import { BlockCard } from "../components/BlockCard.tsx";
 
-export function PlanScreen() {
+export function PlanScreen({
+  onOpenExercise,
+}: {
+  onOpenExercise: (exerciseId: string) => void;
+}) {
   const db = useDb();
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [phases, setPhases] = useState<PhaseRow[]>([]);
@@ -95,7 +99,7 @@ export function PlanScreen() {
       </div>
 
       {blocks.map((b) => (
-        <BlockCard key={b.id} block={b} />
+        <BlockCard key={b.id} block={b} onOpenExercise={onOpenExercise} />
       ))}
     </div>
   );

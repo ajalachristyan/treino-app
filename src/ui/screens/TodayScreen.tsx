@@ -38,9 +38,11 @@ type View =
 export function TodayScreen({
   onStart,
   onAjustes,
+  onOpenExercise,
 }: {
   onStart: () => void;
   onAjustes: () => void;
+  onOpenExercise: (exerciseId: string) => void;
 }) {
   const db = useDb();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -195,7 +197,7 @@ export function TodayScreen({
           )}
 
           {view.blocks.map((b) => (
-            <BlockCard key={b.id} block={b} />
+            <BlockCard key={b.id} block={b} onOpenExercise={onOpenExercise} />
           ))}
 
           <div className="card">

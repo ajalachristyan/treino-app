@@ -117,11 +117,12 @@ button {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   min-height: var(--touch);
-  padding: var(--sp-3);
+  padding: var(--sp-3) var(--sp-1);
   cursor: pointer;
+  white-space: nowrap;
 }
 .navbtn[aria-current="page"] {
   color: var(--accent-soft);
@@ -164,6 +165,10 @@ button {
 }
 .exrow-body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 .exrow-name {
   font-size: 16px;
@@ -479,4 +484,76 @@ button {
 /* ---- Ajustes do plano (P2.5) --------------------------------------------- */
 .actions {
   margin-top: var(--sp-3);
+}
+
+/* =============================================================================
+   Consulta / modo de fazer (Bloco 2)
+   ============================================================================= */
+
+/* Linha de exercicio tocavel (abre o detalhe). Reseta o <button> mas herda o
+   layout flex de .exrow; chevron a direita sinaliza "toca aqui". */
+.exrow-tap {
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  align-items: center;
+  cursor: pointer;
+}
+.exrow-tap:first-child {
+  border-top: none;
+}
+.exrow-tap:active {
+  background: var(--surface-raised);
+}
+.exrow-chevron {
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  margin-left: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+/* Detalhe do exercicio */
+.back-link {
+  display: inline-block;
+  margin-bottom: var(--sp-3);
+  font-size: 16px;
+}
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.howto {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.howto-line {
+  margin: 0 0 var(--sp-3);
+  font-size: 16px;
+  line-height: 1.5;
+}
+.howto-line strong {
+  color: var(--accent-soft);
+}
+.video-row {
+  margin-top: var(--sp-2);
+}
+
+/* Biblioteca (aba Exercicios) */
+.lib-search {
+  margin-bottom: var(--sp-4);
+}
+.lib-group {
+  padding-top: var(--sp-1);
+  padding-bottom: var(--sp-1);
 }

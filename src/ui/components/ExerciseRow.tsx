@@ -1,28 +1,29 @@
 import type { WorkBlockItemRow } from "../../data/plan.ts";
+import { progressionLabel } from "../labels.ts";
 
-// Rotulo curto e leigo do tipo de progressao (so para contexto na leitura).
-const TYPE_LABEL: Record<string, string> = {
-  load_reps: "carga x reps",
-  isometric_intent: "intencao iso",
-  contact_quality: "qualidade do contato",
-  contact_time: "tempo de contato",
-  jump_height: "altura do salto",
-  difficulty_tier: "degrau de dificuldade",
-  assisted_load: "carga assistida",
-  skill_acquisition: "skill",
-  time_under_tension: "tempo sob tensao",
-};
-
-export function ExerciseRow({ item }: { item: WorkBlockItemRow }) {
+// Linha de exercicio dentro de um bloco. Tocavel: abre o detalhe ("modo de
+// fazer"). E um <button>, entao o conteudo usa <span> (button so aceita
+// phrasing content) — o layout de coluna vem do CSS (.exrow-body).
+export function ExerciseRow({
+  item,
+  onOpen,
+}: {
+  item: WorkBlockItemRow;
+  onOpen: (exerciseId: string) => void;
+}) {
   const meta: string[] = [];
-  if (item.planned_sets !== null) meta.push(`${item.planned_sets} series`);
-  meta.push(TYPE_LABEL[item.progression_type] ?? item.progression_type);
+  if (item.planned_sets !== null) meta.push(`${item.planned_sets} séries`);
+  meta.push(progressionLabel(item.progression_type));
 
   return (
-    <div className="exrow">
+    <button
+      type="button"
+      className="exrow exrow-tap"
+      onClick={() => onOpen(item.exercise_id)}
+    >
       <span className="exrow-seq">{item.planned_sequence}</span>
-      <div className="exrow-body">
-        <div className="exrow-name">
+      <span className="exrow-body">
+        <span className="exrow-name">
           {item.exercise_name}
           {item.is_warmup === 1 && (
             <>
@@ -30,14 +31,15 @@ export function ExerciseRow({ item }: { item: WorkBlockItemRow }) {
               <span className="badge badge-warmup">aquecimento</span>
             </>
           )}
-        </div>
-        <div className="exrow-note">
-          <span className="muted">{meta.join(" · ")}</span>
-        </div>
+        </span>
+        <span className="exrow-note muted">{meta.join(" · ")}</span>
         {item.notes !== null && item.notes !== "" && (
-          <div className="exrow-note">{item.notes}</div>
+          <span className="exrow-note">{item.notes}</span>
         )}
-      </div>
-    </div>
+      </span>
+      <span className="exrow-chevron" aria-hidden="true">
+        ›
+      </span>
+    </button>
   );
 }

@@ -9,7 +9,13 @@ import {
 import { useDb } from "../db/DbProvider.tsx";
 import { BlockCard } from "../components/BlockCard.tsx";
 
-function RoutineSection({ routine }: { routine: RoutineRow }) {
+function RoutineSection({
+  routine,
+  onOpenExercise,
+}: {
+  routine: RoutineRow;
+  onOpenExercise: (exerciseId: string) => void;
+}) {
   const db = useDb();
   const [blocks, setBlocks] = useState<WorkBlockRow[]>([]);
 
@@ -35,13 +41,17 @@ function RoutineSection({ routine }: { routine: RoutineRow }) {
         ) : null}
       </h2>
       {blocks.map((b) => (
-        <BlockCard key={b.id} block={b} />
+        <BlockCard key={b.id} block={b} onOpenExercise={onOpenExercise} />
       ))}
     </>
   );
 }
 
-export function RoutineScreen() {
+export function RoutineScreen({
+  onOpenExercise,
+}: {
+  onOpenExercise: (exerciseId: string) => void;
+}) {
   const db = useDb();
   const [routines, setRoutines] = useState<RoutineRow[]>([]);
 
@@ -63,7 +73,7 @@ export function RoutineScreen() {
         domingo).
       </p>
       {routines.map((r) => (
-        <RoutineSection key={r.id} routine={r} />
+        <RoutineSection key={r.id} routine={r} onOpenExercise={onOpenExercise} />
       ))}
     </div>
   );
