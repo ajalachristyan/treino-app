@@ -20,8 +20,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // 'prompt' => fluxo de update explicito (sem auto-update silencioso).
-      registerType: "prompt",
+      // 'autoUpdate': o SW novo faz skipWaiting + clientsClaim e o app recarrega
+      // sozinho na proxima abertura. O 'prompt' anterior exigia uma UI de "nova
+      // versao, atualizar?" que NUNCA foi implementada -> o SW novo ficava em
+      // espera e o app instalado (iPhone) travava na versao antiga (a spike Fase
+      // 0) para sempre, deploy apos deploy. App single-user leigo TEM que se
+      // atualizar sozinho. Sessao ao vivo autosalva cada serie -> reload seguro.
+      registerType: "autoUpdate",
       manifest: {
         name: "Treino",
         short_name: "Treino",
