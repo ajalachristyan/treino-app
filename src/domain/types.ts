@@ -18,6 +18,7 @@ export type JumpTestId = Brand<string, "JumpTestId">;
 export type SessionLoadId = Brand<string, "SessionLoadId">;
 export type BodyWeightLogId = Brand<string, "BodyWeightLogId">;
 export type PainLogId = Brand<string, "PainLogId">;
+export type MissedSessionId = Brand<string, "MissedSessionId">;
 
 export function newId<T extends string>(): T {
   return uuidv7() as T;

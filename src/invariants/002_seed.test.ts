@@ -35,11 +35,14 @@ describe.each(engines)("seed 002_seed_plan — %s", (_name, openDb) => {
     await db.close();
   });
 
-  it("aplica limpo e leva o schema a versao 2", async () => {
-    const v = await db.get<{ v: number }>(
-      "SELECT MAX(version) AS v FROM schema_version",
+  it("aplica limpo e registra a versao 2 (o seed) — a prova de migrations futuras", async () => {
+    // Confirma que o SEED (002) aplicou, SEM cravar MAX(version): migrations
+    // posteriores (ex.: 003_missed_session) levam o schema adiante e nao podem
+    // quebrar este contrato (que e "o seed rodou", nao "nada veio depois").
+    const v = await db.get<{ version: number }>(
+      "SELECT version FROM schema_version WHERE version = 2",
     );
-    expect(v?.v).toBe(2);
+    expect(v?.version).toBe(2);
   });
 
   it("cria exatamente 1 plano de 18 semanas", async () => {

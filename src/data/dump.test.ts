@@ -68,7 +68,7 @@ describe.each(engines)("dumpDatabase round-trip — %s", (_name, openDb) => {
     expect(await schemaObjects(db2)).toEqual(await schemaObjects(db));
 
     // O dump preserva o schema_version do original (seja qual for a ultima
-    // migration — hoje o seed 002 leva a 2).
+    // migration — hoje a 003_missed_session leva a 3).
     const maxVer = (d: Database): Promise<{ v: number } | undefined> =>
       d.get<{ v: number }>("SELECT MAX(version) AS v FROM schema_version");
     expect((await maxVer(db2))?.v).toBe((await maxVer(db))?.v);
