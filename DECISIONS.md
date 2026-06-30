@@ -577,3 +577,80 @@ e que devem ler igual aqui e no brief atualizado:
 
 Se houver divergência entre os dois documentos, o brief é a fonte de verdade
 — este documento explica o porquê; o brief crava o quê.
+
+---
+
+## §G. P2.5 — data de início editável + registro de faltas
+
+Rodada posterior ao Passo 7 (não estava no brief original). Detalhe e raciocínio
+completos: `SPEC-data-inicio-flexivel.md`. Camada de dados red-teamada (5 lentes
+adversariais + revisor); UI red-teamada e smoke-testada no Chrome depois.
+
+### G1 — `plan.start_date` como âncora editável; "que semana" derivado na leitura ("Calendário com empurrão")
+
+**Decisão.** A semana corrente (1..18) é DERIVADA do calendário a partir de
+`plan.start_date` (epoch ms, meia-noite local), não armazenada. O dono move essa
+âncora no app (`src/data/planConfig.ts`): definir/editar a data; "estou na semana
+N" (re-ancora hoje no início da semana N); "repetir esta semana" (empurra o plano
+— ganha a semana atual de novo a partir de hoje; deload/taper deslizam junto;
+nada é pulado).
+
+**Por quê.** O seed gravava `start_date` placeholder imutável (`1735689600000`) →
+"Hoje" mostrava a Semana 18 e o app não era usável no dia a dia. Alternativa
+rejeitada: gravar a semana atual como número editável — jogaria fora a
+periodização (a relação entre as semanas). Derivar do calendário mantém
+deload/taper/pico coerentes ao mover a âncora. Princípio-mãe intacto: o instante é
+fato; "que semana" é interpretação derivada na leitura — nunca toca um treino já
+logado.
+
+**Fonte única + guard.** A âncora é a própria coluna `plan.start_date` — sem
+tabela de settings paralela. `planConfig.ts` é o único módulo, fora de
+`sessions.ts`, autorizado a escrever no plano, e SÓ a âncora: `planConfig.test.ts`
+tem um guard estático (espelha o de `sessions.ts`) que falha se aparecer qualquer
+escrita em plano/catálogo além de `UPDATE plan SET start_date`.
+
+**`repeatCurrentWeek` lê o plano internamente** (não recebe do caller): a semana
+deriva de `start_date`, e um snapshot stale entre dois toques reverteria a âncora
+em silêncio — a classe de bug histórica do projeto (estado velho + escrita =
+estado errado mudo). Leitura e escrita passam pela mesma fila serial do worker.
+
+### G2 — `missed_session`: falta como fato deliberado e imutável (migration 003, aditiva)
+
+**Decisão.** Tabela aditiva `missed_session(id, missed_date, work_block_id?,
+reason?, created_at)`. Só insert/get/delete (sem update; delete só desfaz toque
+errado). Registra "neste dia eu marquei que NÃO treinei".
+
+**Por quê.** Distinto da sessão LAZY (item planejado intocado evapora com registro
+zero — anti-culpa §6.3): a falta é um registro DELIBERADO, pro
+histórico/estatística não virar amnésia ("registrar faltas, sem prejuízo"). Sem
+trigger anti-UPDATE (YAGNI): não há caminho de UPDATE no repositório. Entra no
+backup (dump SQL genérico) de graça.
+
+**Unicidade (endurecimento red team).** Índice PARCIAL `UNIQUE(missed_date) WHERE
+work_block_id IS NULL`: a falta avulsa (dia inteiro) é única por data — a UI
+assume "≤1 falta avulsa/dia" e, sem o índice, um restore/sync (arquivo-LWW, I-11)
+poderia inserir uma 2ª que a UI esconderia (`misses[0]`). Faltas de bloco
+(`work_block_id` NOT NULL) coexistem no mesmo dia.
+
+### G3 — Endurecimento da UI (red team P2.5)
+
+`AjustesScreen`/`TodayScreen`, após red team adversarial + smoke no Chrome:
+
+- **"Repetir esta semana" só visível com o plano ativo** (`started && !future`).
+  Antes ficava ativo no 1º uso (placeholder) e um toque rodava `repeatCurrentWeek`
+  sobre a data placeholder → jogava o dono pra Semana 12 (taper) sem aviso.
+- **`min`/`max` no seletor de data** — barra typo de ano (ex.: 2024) que o clamp de
+  `currentWeek` esconderia jogando pra última semana.
+- **Caixa de erro em falha de escrita/backup** — nunca falhar em silêncio (o backup
+  é a história de durabilidade do app no iOS).
+- **Refresh na virada da meia-noite** (`visibilitychange`/`focus`) — app aberto de
+  um dia pro outro não grava falta do dia errado.
+- **Guard de desmontagem** (padrão do `TodayScreen`, com `mounted.current=true`
+  dentro do efeito — necessário no StrictMode).
+
+### Nota — afrouxamento de `002_seed.test.ts`
+
+O teste do seed passou de `MAX(version)=2` para `version=2 WHERE ...` (afere a
+linha do seed, não o topo do `schema_version`) — necessário para não travar
+quando migrations posteriores (003+) sobem a versão. Tecnicamente correto; mexe
+num teste de invariante e fica registrado aqui.
