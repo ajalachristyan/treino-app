@@ -605,3 +605,21 @@ button {
 .add-ex {
   margin-top: var(--sp-3);
 }
+
+/* Edicao do how_to no detalhe (Bloco 3) */
+.detail-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.howto-textarea {
+  min-height: 220px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+}
