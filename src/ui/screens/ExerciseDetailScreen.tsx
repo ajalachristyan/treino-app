@@ -9,6 +9,16 @@ import {
   CATEGORY_ORDER,
 } from "../labels.ts";
 
+// Busca no YouTube pelo nome do exercicio (tira o que esta entre parenteses pra
+// a query ficar limpa). Nao fixa uma URL — abre a busca, entao nunca "quebra".
+function youtubeSearchUrl(name: string): string {
+  const q = name.replace(/\s*\([^)]*\)/g, "").trim();
+  return (
+    "https://www.youtube.com/results?search_query=" +
+    encodeURIComponent("como fazer " + q)
+  );
+}
+
 // Uma linha do how_to. Se comeca com "Rotulo: ...", destaca o rotulo.
 function HowToLine({ line }: { line: string }) {
   const t = line.trim();
@@ -231,18 +241,26 @@ export function ExerciseDetailScreen({
             <p className="muted">Sem descrição ainda. Toque em “editar”.</p>
           )}
 
-          {ex.video_url !== null && ex.video_url !== "" && (
-            <div className="btn-row video-row">
+          <div className="btn-row video-row">
+            {ex.video_url !== null && ex.video_url !== "" && (
               <a
                 className="btn"
                 href={ex.video_url}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Ver vídeo (abre fora do app)
+                Ver vídeo salvo
               </a>
-            </div>
-          )}
+            )}
+            <a
+              className="btn"
+              href={youtubeSearchUrl(ex.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Ver no YouTube (abre fora do app)
+            </a>
+          </div>
         </>
       )}
     </div>
