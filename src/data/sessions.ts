@@ -35,6 +35,10 @@ import {
   checkInterferenceGate,
   type SessionPlanItem,
 } from "../engine/decision/interference.ts";
+import type {
+  SessionItemHistory,
+  SetData,
+} from "../engine/decision/progression.ts";
 
 export interface SessionRow {
   id: string;
@@ -487,6 +491,73 @@ export async function lastMeasuresFor(
 ): Promise<SetMeasures | undefined> {
   const row = await prefillFromLastExecution(db, exerciseId);
   return row !== undefined ? setRowToMeasures(row) : undefined;
+}
+
+interface ExecutionOccurrenceRow {
+  item_id: string;
+  session_id: string;
+  exercise_id: string;
+  status: SessionItemStatus;
+}
+
+interface ExecutionSetRow {
+  session_item_id: string;
+  reps: number; // filtrado NOT NULL no SQL
+  load_kg: number; // filtrado NOT NULL no SQL
+}
+
+/**
+ * Historico de EXECUCAO de um exercicio: as N ocorrencias executadas mais
+ * recentes, em ordem cronologica ASCENDENTE, no shape que o motor consome
+ * (SessionItemHistory). Alimenta a progressao/prescricao por fase e o prefill.
+ * Chaveia pelo exercise_id ATUAL feito (I-15: o substituto entra por si; o
+ * planejado nao-feito nao entra). Exclui warmup e status nao-executado (a mesma
+ * regra do motor). So series load_reps (com reps+carga) — as demais nao carregam.
+ */
+export async function executionHistoryFor(
+  db: Database,
+  exerciseId: string,
+  limit: number,
+): Promise<SessionItemHistory[]> {
+  const occurrences = await db.all<ExecutionOccurrenceRow>(
+    `SELECT si.id AS item_id, si.session_id, si.exercise_id, si.status
+     FROM session_item si
+     JOIN session s ON s.id = si.session_id
+     WHERE si.exercise_id = ?
+       AND si.status IN ('done', 'substituted', 'reordered', 'added_adhoc')
+       AND si.is_warmup = 0
+     ORDER BY s.started_at DESC, si.timestamp_server DESC
+     LIMIT ?`,
+    [exerciseId, limit],
+  );
+  if (occurrences.length === 0) return [];
+  occurrences.reverse(); // cronologico ASCENDENTE (o motor le a mais recente por ultimo)
+
+  const itemIds = occurrences.map((o) => o.item_id);
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const setRows = await db.all<ExecutionSetRow>(
+    `SELECT session_item_id, reps, load_kg
+     FROM session_set
+     WHERE session_item_id IN (${placeholders})
+       AND reps IS NOT NULL AND load_kg IS NOT NULL
+     ORDER BY session_item_id, set_index`,
+    itemIds,
+  );
+
+  const setsByItem = new Map<string, SetData[]>();
+  for (const row of setRows) {
+    const list = setsByItem.get(row.session_item_id) ?? [];
+    list.push({ reps: row.reps, loadKg: row.load_kg });
+    setsByItem.set(row.session_item_id, list);
+  }
+
+  return occurrences.map((o) => ({
+    sessionId: o.session_id,
+    exerciseId: o.exercise_id,
+    status: o.status,
+    isWarmup: false, // filtrado no SQL (is_warmup = 0)
+    sets: setsByItem.get(o.item_id) ?? [],
+  }));
 }
 
 // ---------------------------------------------------------------------------

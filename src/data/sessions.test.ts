@@ -22,6 +22,7 @@ import {
   resequenceItems,
   writeSet,
   prefillFromLastExecution,
+  executionHistoryFor,
   applyInterferenceGate,
   suggestSubstitutes,
   getFinishedSessions,
@@ -441,6 +442,85 @@ describe.each(engines)("sessions — %s", (_name, openDb) => {
     const finished = await getFinishedSessions(db);
     expect(finished.map((f) => f.id)).toEqual([s2, s1]); // recente primeiro
     expect(finished[0]?.work_block_name).toBe("Qui — SUPERIOR + tornozelo");
+  });
+
+  // --- executionHistoryFor (W2a — alimenta progressao/prescricao + prefill) --
+
+  const DAY = 86_400_000;
+
+  it("executionHistoryFor: execucoes do exercicio em ordem cronologica ASCENDENTE", async () => {
+    const s1 = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    const i1 = await markItemDone(db, { sessionId: s1, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T });
+    await writeSet(db, { sessionItemId: i1, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 100 }, now: T });
+
+    const s2 = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T + DAY });
+    const i2 = await markItemDone(db, { sessionId: s2, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T + DAY });
+    await writeSet(db, { sessionItemId: i2, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 110 }, now: T + DAY });
+
+    const hist = await executionHistoryFor(db, "ex_back_squat", 5);
+    expect(hist).toHaveLength(2);
+    expect(hist[0]?.sets[0]?.loadKg).toBe(100); // mais antiga primeiro
+    expect(hist[1]?.sets[0]?.loadKg).toBe(110); // mais nova por ultimo
+  });
+
+  it("executionHistoryFor: limita as N execucoes mais recentes (ascendente)", async () => {
+    const loads = [100, 110, 120];
+    for (let k = 0; k < loads.length; k++) {
+      const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T + k * DAY });
+      const it = await markItemDone(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T + k * DAY });
+      await writeSet(db, { sessionItemId: it, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: loads[k]! }, now: T + k * DAY });
+    }
+    const hist = await executionHistoryFor(db, "ex_back_squat", 2);
+    expect(hist).toHaveLength(2); // dropa a mais antiga (100)
+    expect(hist[0]?.sets[0]?.loadKg).toBe(110);
+    expect(hist[1]?.sets[0]?.loadKg).toBe(120);
+  });
+
+  it("executionHistoryFor: cada execucao traz as series na ordem (set_index)", async () => {
+    const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    const it = await markItemDone(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T });
+    await writeSet(db, { sessionItemId: it, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 100 }, now: T });
+    await writeSet(db, { sessionItemId: it, setIndex: 2, measures: { progressionType: "load_reps", reps: 5, loadKg: 102.5 }, now: T + 1 });
+    await writeSet(db, { sessionItemId: it, setIndex: 3, measures: { progressionType: "load_reps", reps: 4, loadKg: 105 }, now: T + 2 });
+
+    const hist = await executionHistoryFor(db, "ex_back_squat", 5);
+    expect(hist).toHaveLength(1);
+    expect(hist[0]?.sets.map((x) => x.reps)).toEqual([5, 5, 4]);
+    expect(hist[0]?.sets.map((x) => x.loadKg)).toEqual([100, 102.5, 105]);
+  });
+
+  it("executionHistoryFor: exclui warmup e status nao-executado", async () => {
+    const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    // warmup executado (deve sair): carga sentinela 999
+    const w = await markItemDone(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: true, now: T });
+    await writeSet(db, { sessionItemId: w, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 999 }, now: T });
+    // pulado (deve sair)
+    await skipItem(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 2, reason: userChoice, now: T });
+    // executado de verdade (deve ficar)
+    const d = await markItemDone(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 3, isWarmup: false, now: T });
+    await writeSet(db, { sessionItemId: d, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 100 }, now: T });
+
+    const hist = await executionHistoryFor(db, "ex_back_squat", 5);
+    expect(hist).toHaveLength(1); // so o executado nao-warmup
+    expect(hist[0]?.sets[0]?.loadKg).toBe(100); // nao vazou o warmup 999
+  });
+
+  it("executionHistoryFor: sem execucao => lista vazia", async () => {
+    expect(await executionHistoryFor(db, "ex_back_squat", 5)).toEqual([]);
+  });
+
+  it("executionHistoryFor: substituto entra pelo proprio id, nao pelo planejado (I-15)", async () => {
+    const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    // back squat (wbi_ter_2) substituido por zercher; exercise_id = SUBSTITUTO
+    const it = await substituteItem(db, { sessionId: s, substituteExerciseId: "ex_zercher_leve", plannedWorkBlockItemId: "wbi_ter_2", actualSequence: 1, reason: userChoice, now: T });
+    await writeSet(db, { sessionItemId: it, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 60 }, now: T });
+
+    // o planejado nao foi executado COMO back squat:
+    expect(await executionHistoryFor(db, "ex_back_squat", 5)).toEqual([]);
+    // o substituto progride a si mesmo:
+    const zercher = await executionHistoryFor(db, "ex_zercher_leve", 5);
+    expect(zercher).toHaveLength(1);
+    expect(zercher[0]?.sets[0]?.loadKg).toBe(60);
   });
 });
 
