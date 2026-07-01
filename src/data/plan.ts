@@ -45,6 +45,8 @@ export interface WorkBlockItemRow {
   is_warmup: number; // 0/1
   acute_interference: number; // 0/1 — alimenta o gate I-13
   function_tag: string | null;
+  rep_min: number | null; // faixa de reps do cadastro (prescricao por fase)
+  rep_max: number | null;
 }
 
 export interface RoutineRow {
@@ -126,7 +128,7 @@ export function getWorkBlockItems(
     `SELECT wbi.id, wbi.exercise_id, e.name AS exercise_name,
             e.progression_type, e.priority, wbi.planned_sequence,
             wbi.planned_sets, wbi.notes, wbi.is_warmup, e.acute_interference,
-            e.function_tag
+            e.function_tag, e.rep_min, e.rep_max
      FROM work_block_item wbi
      JOIN exercise e ON e.id = wbi.exercise_id
      WHERE wbi.work_block_id = ? AND wbi.active = 1

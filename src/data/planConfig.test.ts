@@ -9,7 +9,7 @@ import { BetterSqlite3Adapter } from "../db/adapters/better-sqlite3.ts";
 import { WaSqliteNodeAdapter } from "../db/adapters/wa-sqlite-node.ts";
 import { applyMigrations } from "../db/runner.ts";
 import { loadMigrations } from "../db/migrations.ts";
-import { getPlan, currentWeek } from "./plan.ts";
+import { getPlan, getPhases, currentWeek, type PlanRow } from "./plan.ts";
 import {
   SEED_PLACEHOLDER_START_DATE,
   isStartDateSet,
@@ -17,6 +17,7 @@ import {
   setStartDate,
   setCurrentWeekToday,
   repeatCurrentWeek,
+  resolveSessionPhase,
 } from "./planConfig.ts";
 
 const DAY_MS = 86400000;
@@ -132,6 +133,45 @@ describe.each(engines)("planConfig — ancora editavel — %s", (_name, openDb) 
     // ganhou a semana: +6 dias ainda e 2; so vira 3 na semana seguinte
     expect(currentWeek(p!, localMidnight(day9) + 6 * DAY_MS)).toBe(2);
     expect(currentWeek(p!, localMidnight(day9) + 8 * DAY_MS)).toBe(3);
+  });
+
+  it("resolveSessionPhase: placeholder do seed => null (sem data real nao chuta a fase)", async () => {
+    const phases = await getPhases(db, "pl_vertical_18w");
+    const plan: PlanRow = {
+      id: "pl_vertical_18w",
+      name: "x",
+      start_date: SEED_PLACEHOLDER_START_DATE,
+      duration_weeks: 18,
+    };
+    expect(
+      resolveSessionPhase(plan, phases, SEED_PLACEHOLDER_START_DATE + DAY_MS),
+    ).toBeNull();
+  });
+
+  it("resolveSessionPhase: inicio no futuro => null (mesma guarda do PhaseBanner)", async () => {
+    const phases = await getPhases(db, "pl_vertical_18w");
+    const start = localMidnight(new Date(2026, 7, 12));
+    const plan: PlanRow = { id: "pl_vertical_18w", name: "x", start_date: start, duration_weeks: 18 };
+    expect(resolveSessionPhase(plan, phases, start - 1000)).toBeNull();
+  });
+
+  it("resolveSessionPhase: semana de M1 => enfase m1 (parent m1)", async () => {
+    const phases = await getPhases(db, "pl_vertical_18w");
+    const start = localMidnight(new Date(2026, 7, 12));
+    const plan: PlanRow = { id: "pl_vertical_18w", name: "x", start_date: start, duration_weeks: 18 };
+    const pc = resolveSessionPhase(plan, phases, start); // semana 1
+    expect(pc?.emphasis).toBe("m1");
+    expect(pc?.parentEmphasis).toBe("m1");
+  });
+
+  it("resolveSessionPhase: semana de deload => enfase deload, parent m1", async () => {
+    const phases = await getPhases(db, "pl_vertical_18w");
+    const start = localMidnight(new Date(2026, 7, 12));
+    const WEEK = 7 * DAY_MS;
+    const plan: PlanRow = { id: "pl_vertical_18w", name: "x", start_date: start, duration_weeks: 18 };
+    const pc = resolveSessionPhase(plan, phases, start + 5 * WEEK); // semana 6 = deload 1
+    expect(pc?.emphasis).toBe("deload");
+    expect(pc?.parentEmphasis).toBe("m1"); // a recuperacao serve o bloco anterior
   });
 
   it("setStartDate rejeita NaN/Infinity pela PROPRIA guarda (nao pelo NOT NULL do schema)", async () => {

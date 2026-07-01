@@ -20,7 +20,8 @@
 // =============================================================================
 
 import type { Database } from "../db/adapter.ts";
-import { currentWeek, getPlan, type PlanRow } from "./plan.ts";
+import { currentWeek, getPlan, type PlanRow, type PhaseRow } from "./plan.ts";
+import { phaseContext, type PhaseContext } from "../engine/decision/phase.ts";
 
 const WEEK_MS = 7 * 86400000;
 
@@ -34,6 +35,21 @@ export const SEED_PLACEHOLDER_START_DATE = 1735689600000;
 /** A data de inicio ainda e o placeholder do seed (o dono nao escolheu)? */
 export function isStartDateSet(plan: PlanRow): boolean {
   return plan.start_date !== SEED_PLACEHOLDER_START_DATE;
+}
+
+/**
+ * Fase (enfase) DERIVADA para a sessao de hoje — o insumo da prescricao por fase
+ * (W3). READ puro (nao escreve; mora aqui so porque depende de isStartDateSet).
+ * Null quando a ancora ainda e o placeholder do seed OU o inicio e futuro (mesma
+ * guarda do PhaseBanner): sem data real, "que semana" e chute — nao sugere fase.
+ */
+export function resolveSessionPhase(
+  plan: PlanRow,
+  phases: readonly PhaseRow[],
+  now: number,
+): PhaseContext | null {
+  if (!isStartDateSet(plan) || plan.start_date > now) return null;
+  return phaseContext(phases, currentWeek(plan, now)) ?? null;
 }
 
 /** Meia-noite LOCAL do dia de `d`, em epoch ms. A ancora de inicio do plano. */

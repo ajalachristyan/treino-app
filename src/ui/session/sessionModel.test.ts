@@ -21,6 +21,8 @@ function wbi(over: Partial<WorkBlockItemRow>): WorkBlockItemRow {
     is_warmup: 0,
     acute_interference: 0,
     function_tag: null,
+    rep_min: null,
+    rep_max: null,
     ...over,
   };
 }
@@ -29,7 +31,15 @@ describe("sessionModel", () => {
   it("plannedToLiveItems: mapeia campos, status planned, sem linha, chaves unicas", () => {
     const items = plannedToLiveItems([
       wbi({ id: "wbi_1", exercise_id: "ex_a", exercise_name: "A", is_warmup: 1 }),
-      wbi({ id: "wbi_2", exercise_id: "ex_b", exercise_name: "B" }),
+      wbi({
+        id: "wbi_2",
+        exercise_id: "ex_b",
+        exercise_name: "B",
+        function_tag: "forca_maxima_agachamento",
+        planned_sets: 3,
+        rep_min: 5,
+        rep_max: 8,
+      }),
     ]);
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({
@@ -43,6 +53,18 @@ describe("sessionModel", () => {
     expect(items[0]?.sets).toEqual([]);
     // chaves de React unicas
     expect(items[0]?.localKey).not.toBe(items[1]?.localKey);
+    // W3.1: os campos que a prescricao por fase consome sao threaded pro LiveItem
+    expect(items[1]).toMatchObject({
+      functionTag: "forca_maxima_agachamento",
+      plannedSets: 3,
+      repMin: 5,
+      repMax: 8,
+    });
+    // sem faixa/tag no cadastro => null (defaults do wbi)
+    expect(items[0]?.functionTag).toBeNull();
+    expect(items[0]?.plannedSets).toBeNull();
+    expect(items[0]?.repMin).toBeNull();
+    expect(items[0]?.repMax).toBeNull();
   });
 
   it("moveItem: reordena imutavelmente; indices invalidos -> copia inalterada", () => {
@@ -56,6 +78,10 @@ describe("sessionModel", () => {
       isWarmup: false,
       status: "planned",
       sets: [],
+      functionTag: null,
+      plannedSets: null,
+      repMin: null,
+      repMax: null,
     }));
     expect(moveItem(base, 0, 2).map((i) => i.localKey)).toEqual(["b", "c", "a"]);
     expect(moveItem(base, 2, 0).map((i) => i.localKey)).toEqual(["c", "a", "b"]);
@@ -77,6 +103,10 @@ describe("sessionModel", () => {
       isWarmup: false,
       status: "planned",
       sets: [],
+      functionTag: null,
+      plannedSets: null,
+      repMin: null,
+      repMax: null,
     }));
     const next = patchItem(base, "b", (it) => ({ ...it, status: "skipped" }));
     expect(next[0]?.status).toBe("planned");

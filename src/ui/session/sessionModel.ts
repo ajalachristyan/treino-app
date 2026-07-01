@@ -30,6 +30,12 @@ export interface LiveItem {
   isWarmup: boolean;
   status: LiveStatus;
   sets: LiveSet[];
+  // Insumos da prescricao por fase (W3). null quando fora do plano (ad-hoc) ou
+  // quando o cadastro nao tem o dado.
+  functionTag: string | null;
+  plannedSets: number | null;
+  repMin: number | null;
+  repMax: number | null;
 }
 
 /** Monta os LiveItems planejados (status 'planned', sem linha) do bloco do dia. */
@@ -46,6 +52,10 @@ export function plannedToLiveItems(
     isWarmup: p.is_warmup === 1,
     status: "planned",
     sets: [],
+    functionTag: p.function_tag,
+    plannedSets: p.planned_sets,
+    repMin: p.rep_min,
+    repMax: p.rep_max,
   }));
 }
 

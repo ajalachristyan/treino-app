@@ -117,6 +117,16 @@ describe.each(engines)("plan — selectors sobre o seed — %s", (_name, openDb)
     expect(items[0]?.exercise_name).toBeTruthy(); // JOIN trouxe o nome
   });
 
+  it("getWorkBlockItems: traz rep_min/rep_max do exercicio (pra prescricao por fase)", async () => {
+    const items = await getWorkBlockItems(db, "wb_ter_forca");
+    const squat = items.find((i) => i.exercise_id === "ex_back_squat");
+    expect(squat?.rep_min).toBe(5); // faixa do cadastro (ex_back_squat 5-8)
+    expect(squat?.rep_max).toBe(8);
+    const warm = items.find((i) => i.is_warmup === 1);
+    expect(warm?.rep_min).toBeNull(); // aquecimento nao tem faixa
+    expect(warm?.rep_max).toBeNull();
+  });
+
   it("getAttachableRoutines: recorrente primeiro", async () => {
     const routines = await getAttachableRoutines(db);
     expect(routines.length).toBeGreaterThanOrEqual(2);

@@ -25,6 +25,7 @@ import {
   isoDayOfWeek,
   phaseForWeek,
 } from "../../data/plan.ts";
+import { resolveSessionPhase } from "../../data/planConfig.ts";
 import * as sessions from "../../data/sessions.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
 import { createSerialQueue } from "../../db/concurrency.ts";
@@ -38,6 +39,11 @@ import type {
   InterferenceWarning,
   SessionPlanItem,
 } from "../../engine/decision/interference.ts";
+import type {
+  PhaseContext,
+  PhaseEmphasis,
+  PhaseKind,
+} from "../../engine/decision/phase.ts";
 import type { DeviationReason, ProgressionType } from "../../domain/types.ts";
 
 export type SessionPhase = "checking" | "idle" | "active" | "ended";
@@ -52,6 +58,8 @@ export interface LiveSessionApi {
   phase: SessionPhase;
   hasActive: boolean;
   todayLabel: string;
+  phaseEmphasis: PhaseEmphasis | null; // m1/m2/m3 do bloco (recuperacao herda o pai)
+  phaseKind: PhaseKind | null; // inclui deload/taper (pra encolher a sugestao)
   startedAt: number | null;
   endedAt: number | null;
   lastSetAt: number | null;
@@ -82,6 +90,7 @@ export function useLiveSession(): LiveSessionApi {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [endedAt, setEndedAt] = useState<number | null>(null);
   const [lastSetAt, setLastSetAt] = useState<number | null>(null);
+  const [phaseCtx, setPhaseCtx] = useState<PhaseContext | null>(null);
 
   const itemsRef = useRef<LiveItem[]>([]);
   const sessionIdRef = useRef<string | null>(null);
@@ -144,6 +153,7 @@ export function useLiveSession(): LiveSessionApi {
         setLastSetAt(now.getTime());
         commit([]);
         setWarning(null);
+        setPhaseCtx(null);
         setTodayLabel("Sessao livre");
         setPhase("active");
         return;
@@ -154,6 +164,7 @@ export function useLiveSession(): LiveSessionApi {
       const blocks = await getPlanBlocksForWeek(db, plan.id, week);
       const block = blocks.find((b) => b.day_of_week === iso) ?? null;
       const phaseName = phaseForWeek(phases, week)?.name ?? "";
+      const pc = resolveSessionPhase(plan, phases, now.getTime());
       const planned = block ? await getWorkBlockItems(db, block.id) : [];
 
       const sid = await sessions.startTodaySession(db, {
@@ -176,6 +187,7 @@ export function useLiveSession(): LiveSessionApi {
       setLastSetAt(now.getTime());
       commit(plannedToLiveItems(planned));
       setWarning(w);
+      setPhaseCtx(pc);
       setTodayLabel(block ? `Semana ${week} · ${phaseName}` : "Sessao livre (sem bloco hoje)");
       setPhase("active");
     });
@@ -190,6 +202,11 @@ export function useLiveSession(): LiveSessionApi {
         setHasActive(false);
         return;
       }
+      const plan = await getPlan(db);
+      const pc =
+        plan !== undefined
+          ? resolveSessionPhase(plan, await getPhases(db, plan.id), Date.now())
+          : null;
       const planned = active.work_block_id
         ? await getWorkBlockItems(db, active.work_block_id)
         : [];
@@ -224,6 +241,11 @@ export function useLiveSession(): LiveSessionApi {
             measures: sessions.setRowToMeasures(r),
             rpe: r.rpe,
           })),
+          // item tocado: ja tem series, nao precisa da prescricao por fase.
+          functionTag: null,
+          plannedSets: null,
+          repMin: null,
+          repMax: null,
         });
       }
       const untouched = plannedToLiveItems(
@@ -237,6 +259,7 @@ export function useLiveSession(): LiveSessionApi {
       setLastSetAt(Date.now()); // descanso reconta a partir da retomada
       commit([...persistedLive, ...untouched]);
       setWarning(null);
+      setPhaseCtx(pc);
       setTodayLabel("Sessao retomada");
       setPhase("active");
     });
@@ -355,6 +378,11 @@ export function useLiveSession(): LiveSessionApi {
             isWarmup: false,
             status: "added",
             sets: [],
+            // ad-hoc: fora do plano, sem insumos de prescricao por fase.
+            functionTag: null,
+            plannedSets: null,
+            repMin: null,
+            repMax: null,
           },
         ]);
       });
@@ -411,6 +439,7 @@ export function useLiveSession(): LiveSessionApi {
       setLastSetAt(null);
       commit([]);
       setWarning(null);
+      setPhaseCtx(null);
       setHasActive(false);
       setPhase("idle");
     });
@@ -420,6 +449,8 @@ export function useLiveSession(): LiveSessionApi {
     phase,
     hasActive,
     todayLabel,
+    phaseEmphasis: phaseCtx?.parentEmphasis ?? null,
+    phaseKind: phaseCtx?.emphasis ?? null,
     startedAt,
     endedAt,
     lastSetAt,
