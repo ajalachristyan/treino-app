@@ -63,7 +63,8 @@ export interface LiveSessionApi {
   substitute: (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => void;
   addAdhoc: (ex: ExerciseChoice) => void;
   move: (from: number, to: number) => void;
-  finalize: () => void;
+  finalize: () => Promise<void>;
+  discard: () => void;
 }
 
 export function useLiveSession(): LiveSessionApi {
@@ -367,8 +368,8 @@ export function useLiveSession(): LiveSessionApi {
     [db, run, commit],
   );
 
-  const finalize = useCallback((): void => {
-    void run(async () => {
+  const finalize = useCallback((): Promise<void> => {
+    return run(async () => {
       const sid = sessionIdRef.current;
       if (sid === null) return;
       await sessions.endSession(db, sid, Date.now());
@@ -377,6 +378,21 @@ export function useLiveSession(): LiveSessionApi {
       setHasActive(false);
     });
   }, [db, run]);
+
+  // Descarta a sessao inteira (treino de teste/engano). Volta pro idle limpo.
+  const discard = useCallback((): void => {
+    void run(async () => {
+      const sid = sessionIdRef.current;
+      if (sid === null) return;
+      await sessions.discardSession(db, sid);
+      sessionIdRef.current = null;
+      seqRef.current = 1;
+      commit([]);
+      setWarning(null);
+      setHasActive(false);
+      setPhase("idle");
+    });
+  }, [db, run, commit]);
 
   return {
     phase,
@@ -394,5 +410,6 @@ export function useLiveSession(): LiveSessionApi {
     addAdhoc,
     move,
     finalize,
+    discard,
   };
 }

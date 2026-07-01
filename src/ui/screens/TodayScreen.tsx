@@ -38,10 +38,12 @@ type View =
 export function TodayScreen({
   onStart,
   onAjustes,
+  onHistorico,
   onOpenExercise,
 }: {
   onStart: () => void;
   onAjustes: () => void;
+  onHistorico: () => void;
   onOpenExercise: (exerciseId: string) => void;
 }) {
   const db = useDb();
@@ -232,6 +234,14 @@ export function TodayScreen({
       )}
 
       <div className="backup btn-row">
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={onHistorico}
+        >
+          Treinos anteriores (Histórico)
+        </button>
         <button
           type="button"
           className="btn"

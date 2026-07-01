@@ -69,7 +69,10 @@ button {
 
 .screen {
   flex: 1;
-  padding: var(--sp-5) var(--sp-4)
+  /* topo: reserva a area da barra de status do iPhone (relogio/notch) via
+     safe-area-inset-top — sem isto o titulo/"Voltar" ficava colado no relogio
+     no modo instalado (status-bar-style black-translucent). */
+  padding: calc(var(--sp-5) + env(safe-area-inset-top)) var(--sp-4)
     calc(var(--sp-6) + var(--touch) + env(safe-area-inset-bottom));
   max-width: 680px;
   width: 100%;
@@ -520,8 +523,11 @@ button {
 
 /* Detalhe do exercicio */
 .back-link {
-  display: inline-block;
-  margin-bottom: var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch); /* alvo de toque confortavel longe do relogio */
+  margin-bottom: var(--sp-2);
+  padding-right: var(--sp-4);
   font-size: 16px;
 }
 .detail-tags {
@@ -611,6 +617,40 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* =============================================================================
+   Historico (treinos finalizados)
+   ============================================================================= */
+.hist-item {
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+.hist-item:first-of-type {
+  border-top: none;
+}
+.hist-item-name {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.hist-sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.hist-set {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--sp-2);
 }
 .edit-form {
   display: flex;

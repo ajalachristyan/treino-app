@@ -24,6 +24,8 @@ import {
   prefillFromLastExecution,
   applyInterferenceGate,
   suggestSubstitutes,
+  getFinishedSessions,
+  discardSession,
 } from "./sessions.ts";
 
 type AdapterFactory = (path: string) => Promise<Database>;
@@ -381,6 +383,64 @@ describe.each(engines)("sessions — %s", (_name, openDb) => {
     const pre = await prefillFromLastExecution(db, "ex_back_squat");
     expect(pre?.progression_type).toBe("load_reps");
     expect(pre?.load_kg).toBe(105); // a mais recente (timestamp maior)
+  });
+
+  it("discardSession apaga a sessao inteira (series+itens) e NAO toca o plano", async () => {
+    const before = await snapshotPlan();
+    const sid = await startTodaySession(db, {
+      planId: "pl_vertical_18w",
+      workBlockId: "wb_ter_forca",
+      now: T,
+    });
+    const item = await markItemDone(db, {
+      sessionId: sid,
+      exerciseId: "ex_back_squat",
+      workBlockItemId: "wbi_ter_2",
+      actualSequence: 1,
+      isWarmup: false,
+      now: T,
+    });
+    await writeSet(db, {
+      sessionItemId: item,
+      setIndex: 1,
+      measures: { progressionType: "load_reps", reps: 5, loadKg: 100 },
+      now: T,
+    });
+    await endSession(db, sid, T + 1000);
+
+    await discardSession(db, sid);
+
+    expect(
+      await db.get(`SELECT id FROM session WHERE id = ?`, [sid]),
+    ).toBeUndefined();
+    expect(await getSessionItems(db, sid)).toHaveLength(0);
+    expect(await db.all(`SELECT id FROM session_set`)).toHaveLength(0);
+    expect(await snapshotPlan()).toEqual(before); // plano/catalogo intactos
+  });
+
+  it("getFinishedSessions: so as finalizadas, mais recentes primeiro", async () => {
+    const s1 = await startTodaySession(db, {
+      planId: "pl_vertical_18w",
+      workBlockId: "wb_ter_forca",
+      now: T,
+    });
+    await endSession(db, s1, T + 1000);
+    const s2 = await startTodaySession(db, {
+      planId: "pl_vertical_18w",
+      workBlockId: "wb_qui_superior",
+      now: T + 2000,
+    });
+    await endSession(db, s2, T + 3000);
+    // uma terceira, ainda em andamento — NAO deve aparecer.
+    await startTodaySession(db, {
+      planId: "pl_vertical_18w",
+      workBlockId: "wb_ter_forca",
+      now: T + 4000,
+    });
+
+    const finished = await getFinishedSessions(db);
+    expect(finished.map((f) => f.id)).toEqual([s2, s1]); // recente primeiro
+    expect(finished[0]?.work_block_name).toBe("Qui — SUPERIOR + tornozelo");
   });
 });
 

@@ -12,27 +12,7 @@ import { type LiveItem } from "../session/sessionModel.ts";
 import { SetInput } from "../session/SetInput.tsx";
 import { ExercisePicker } from "../session/ExercisePicker.tsx";
 import type { DeviationReason } from "../../domain/types.ts";
-
-function formatMeasures(m: SetMeasures): string {
-  switch (m.progressionType) {
-    case "load_reps":
-      return `${m.reps} x ${m.loadKg} kg`;
-    case "assisted_load":
-      return `${m.reps} x assist. ${m.assistedLoadKg} kg`;
-    case "isometric_intent":
-      return `${m.intentPct}% intencao`;
-    case "contact_quality":
-      return m.quality;
-    case "jump_height":
-      return `${m.heightCm} cm`;
-    case "difficulty_tier":
-      return `degrau ${m.difficultyStep}`;
-    case "skill_acquisition":
-      return m.skillAchieved ? "fez" : "nao fez";
-    case "time_under_tension":
-      return `${m.seconds} s`;
-  }
-}
+import { formatMeasures } from "../labels.ts";
 
 const SKIP_REASONS: ReadonlyArray<readonly [DeviationReason, string]> = [
   ["equipment_busy", "equip. ocupado"],
@@ -166,6 +146,19 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
   const db = useDb();
   const api = useLiveSession();
   const [adding, setAdding] = useState(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+
+  // Finaliza e, na sequencia, tenta salvar um backup externo (copia de
+  // seguranca automatica). Se o iOS nao abrir a folha de salvar (a ativacao do
+  // toque some depois do await), o botao "Baixar backup" da tela final resolve.
+  async function finalizeAndBackup(): Promise<void> {
+    await api.finalize();
+    try {
+      await downloadBackup(db);
+    } catch {
+      // silencioso — o botao manual continua disponivel na tela "registrado".
+    }
+  }
 
   // Auto-retoma uma sessao em andamento ao entrar na tela.
   useEffect(() => {
@@ -200,7 +193,10 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
     return (
       <div className="screen">
         <h1 className="h1">Treino registrado ✓</h1>
-        <p className="sub">{logged} exercicio(s) com series. Bom trabalho.</p>
+        <p className="sub">
+          {logged} exercicio(s) com series. Salvo no aparelho — aparece em
+          Histórico. Se a folha de salvar não abriu, baixe a cópia aqui.
+        </p>
         <div className="btn-row">
           <button type="button" className="btn" onClick={() => void downloadBackup(db)}>
             Baixar backup (.sql)
@@ -246,12 +242,35 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
         <button type="button" className="btn" onClick={() => setAdding(true)}>
           + adicionar exercicio
         </button>
-        <button type="button" className="btn btn-primary" onClick={() => void api.finalize()}>
+        <button type="button" className="btn btn-primary" onClick={() => void finalizeAndBackup()}>
           Finalizar treino
         </button>
         <button type="button" className="btn" onClick={() => void downloadBackup(db)}>
           Baixar backup (.sql)
         </button>
+
+        {confirmingDiscard ? (
+          <div className="choice-row">
+            <span className="muted">apagar este treino de vez?</span>
+            <button
+              type="button"
+              className="choice"
+              onClick={() => {
+                setConfirmingDiscard(false);
+                void api.discard();
+              }}
+            >
+              sim, apagar
+            </button>
+            <button type="button" className="choice" onClick={() => setConfirmingDiscard(false)}>
+              nao
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="linkbtn" onClick={() => setConfirmingDiscard(true)}>
+            descartar treino (teste/engano)
+          </button>
+        )}
       </div>
 
       {adding && (

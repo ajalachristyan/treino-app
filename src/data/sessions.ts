@@ -531,3 +531,53 @@ export function suggestSubstitutes(
     [exerciseId, exerciseId],
   );
 }
+
+// ---------------------------------------------------------------------------
+// HISTORICO (leitura de sessoes finalizadas) + manutencao
+// ---------------------------------------------------------------------------
+
+export interface FinishedSessionRow {
+  id: string;
+  started_at: number;
+  ended_at: number;
+  work_block_name: string | null;
+}
+
+/**
+ * Sessoes FINALIZADAS (ended_at != NULL), mais recentes primeiro, com o nome do
+ * bloco do dia (LEFT JOIN — sessao livre nao tem bloco). E a fonte da tela
+ * Historico: o treino registrado continua no banco depois de finalizar, so
+ * faltava onde ve-lo.
+ */
+export function getFinishedSessions(db: Database): Promise<FinishedSessionRow[]> {
+  return db.all<FinishedSessionRow>(
+    `SELECT s.id, s.started_at, s.ended_at, wb.name AS work_block_name
+     FROM session s
+     LEFT JOIN work_block wb ON wb.id = s.work_block_id
+     WHERE s.ended_at IS NOT NULL
+     ORDER BY s.started_at DESC`,
+  );
+}
+
+/**
+ * Remove uma sessao INTEIRA (series + itens + registros derivados). Uso:
+ * descartar um treino de teste/engano. Cascata manual na ordem das FK, numa
+ * transacao. NUNCA toca no plano (work_block/work_block_item) nem no catalogo —
+ * so apaga o que a propria sessao criou (I-12 continua valido).
+ */
+export async function discardSession(
+  db: Database,
+  sessionId: string,
+): Promise<void> {
+  await db.transaction(async () => {
+    await db.run(
+      `DELETE FROM session_set WHERE session_item_id IN
+         (SELECT id FROM session_item WHERE session_id = ?)`,
+      [sessionId],
+    );
+    await db.run(`DELETE FROM session_item WHERE session_id = ?`, [sessionId]);
+    await db.run(`DELETE FROM session_load WHERE session_id = ?`, [sessionId]);
+    await db.run(`DELETE FROM jump_test WHERE session_id = ?`, [sessionId]);
+    await db.run(`DELETE FROM session WHERE id = ?`, [sessionId]);
+  });
+}
