@@ -18,8 +18,16 @@ import {
   shouldSuggestDeload,
   type LoadEntry,
 } from "../engine/decision/deload.ts";
+import type { PhaseInfo } from "../engine/decision/phase.ts";
 
 const MIN = 60 * 1000;
+
+// Uma fase real (Mes 1) para posicionar as sessoes. O baseline reativo agora
+// conta a sequencia FINAL de quedas (conserto da Divida 2, §7.3 L3), entao o
+// par discriminante de I-5 poe as quedas no FIM da serie — nao no meio.
+const M1_PHASES: PhaseInfo[] = [
+  { weekStart: 1, weekEnd: 5, isDeload: false, isTaper: false, emphasis: "m1" },
+];
 
 describe("I-05 — recall_late carimbado e excluido", () => {
   it("isRecallLate respeita o threshold (>30 min ⇒ true; ≤30 min ⇒ false)", () => {
@@ -29,29 +37,32 @@ describe("I-05 — recall_late carimbado e excluido", () => {
   });
 
   it("entrada recall_late=true eh EXCLUIDA do gatilho de deload", () => {
-    // Quedas estao nos dias 3 e 4, mas ambos marcados recall_late.
+    // Quedas RECENTES (dias 25 e 29), mas ambas recall_late => excluidas => a
+    // serie elegivel fica chapada em 500 => NAO dispara.
     const series: LoadEntry[] = [
-      { day: 1, load: 500, recallLate: false },
-      { day: 2, load: 500, recallLate: false },
-      { day: 3, load: 200, recallLate: true },
-      { day: 4, load: 200, recallLate: true },
-      { day: 5, load: 500, recallLate: false },
-      { day: 6, load: 500, recallLate: false },
-      { day: 7, load: 500, recallLate: false },
+      { day: 1, week: 1, load: 500, recallLate: false },
+      { day: 5, week: 1, load: 500, recallLate: false },
+      { day: 9, week: 2, load: 500, recallLate: false },
+      { day: 13, week: 2, load: 500, recallLate: false },
+      { day: 17, week: 3, load: 500, recallLate: false },
+      { day: 21, week: 3, load: 500, recallLate: false },
+      { day: 25, week: 4, load: 200, recallLate: true },
+      { day: 29, week: 4, load: 200, recallLate: true },
     ];
-    expect(shouldSuggestDeload(series)).toBe(false);
+    expect(shouldSuggestDeload(series, M1_PHASES)).toBe(false);
   });
 
   it("DISCRIMINANTE: serie identica SEM recall_late dispara deload", () => {
     const series: LoadEntry[] = [
-      { day: 1, load: 500, recallLate: false },
-      { day: 2, load: 500, recallLate: false },
-      { day: 3, load: 200, recallLate: false },
-      { day: 4, load: 200, recallLate: false },
-      { day: 5, load: 500, recallLate: false },
-      { day: 6, load: 500, recallLate: false },
-      { day: 7, load: 500, recallLate: false },
+      { day: 1, week: 1, load: 500, recallLate: false },
+      { day: 5, week: 1, load: 500, recallLate: false },
+      { day: 9, week: 2, load: 500, recallLate: false },
+      { day: 13, week: 2, load: 500, recallLate: false },
+      { day: 17, week: 3, load: 500, recallLate: false },
+      { day: 21, week: 3, load: 500, recallLate: false },
+      { day: 25, week: 4, load: 200, recallLate: false },
+      { day: 29, week: 4, load: 200, recallLate: false },
     ];
-    expect(shouldSuggestDeload(series)).toBe(true);
+    expect(shouldSuggestDeload(series, M1_PHASES)).toBe(true);
   });
 });

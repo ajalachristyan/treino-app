@@ -76,3 +76,43 @@ export const DELOAD_VOLUME_FACTOR = 0.5; // ~50% do volume normal
  * Fonte: plano-vertical-grade-operacional.md:70 ("corta ~60% do volume de pesos").
  */
 export const TAPER_VOLUME_FACTOR = 0.4; // mantem ~40% do volume = corta ~60%
+
+// ----------------------------------------------------------------------------
+// Baseline reativo do deload (conserto da Divida 2 — plano do motor §7.3 L3).
+// O gatilho NAO usa max global (envenenado por 1 outlier / leitura errada da
+// fase — red team B1): usa a MEDIANA de uma janela recente POR ENFASE.
+// ----------------------------------------------------------------------------
+
+/**
+ * Tamanho da JANELA RECENTE (em sessoes da mesma enfase) de onde sai a mediana
+ * de referencia do baseline. Recente = reflete a fase atual; limitada = robusta
+ * a historico antigo. Placeholder sensato (~3 semanas de forca 2x/sem); dono
+ * valida com dados reais. Fonte: plano do motor §7.3 L3.
+ */
+export const BASELINE_WINDOW_SESSIONS = 6;
+
+/**
+ * Minimo de sessoes de REFERENCIA (por enfase, fora a sequencia recente) para
+ * o baseline ser confiavel. Abaixo disto a mediana viraria 1-2 pontos e um dia
+ * duro real (nao typo) envenenaria o baseline (red team adversarial B). Placeholder;
+ * dono valida. Fonte: plano do motor §7.3 L3 / red team.
+ */
+export const BASELINE_MIN_SESSIONS = 3;
+
+/**
+ * Gap de calendario (dias) entre duas sessoes acima do qual a sequencia de
+ * quedas QUEBRA — contar por semana de calendario real, nao por adjacencia de
+ * array (red team S1). Forca e ~2x/sem (gap tipico 3-4 dias); >14 dias e uma
+ * interrupcao (pausa/volta), nao "quedas consecutivas". Placeholder; dono
+ * valida. Fonte: plano do motor §7.3 L3 / red team S1.
+ */
+export const MAX_SESSION_GAP_DAYS = 14;
+
+/**
+ * Teto de sanidade da carga-de-sessao (Foster AU = sRPE x duracao) na INGESTAO
+ * do baseline. Cargas acima disto sao erro de digitacao (duration_min nao tem
+ * teto no schema) e sao IGNORADAS — cinto+suspensorio, ja que a mediana tambem
+ * protege (red team: guarda de sanidade). ~3000 AU fica bem acima de qualquer
+ * sessao real (sRPE 10 x 300 min). Placeholder; dono valida. Fonte: §7.3 L3.
+ */
+export const LOAD_SANITY_CAP = 3000;

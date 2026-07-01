@@ -5,6 +5,11 @@
 // =============================================================================
 
 import { TREND_REGRESSION_THRESHOLD_PCT } from "../../domain/constants.ts";
+import type { PhaseInfo } from "./phase.ts";
+
+// Re-export para compat: consumidores (I-14.test.ts) importam PhaseInfo daqui.
+// A definicao unica mora em phase.ts (seam de fase).
+export type { PhaseInfo };
 
 export type TrendClassification = "rising" | "stable" | "regression";
 
@@ -13,27 +18,25 @@ export interface WeeklyVolume {
   readonly volume: number;
 }
 
-export interface PhaseInfo {
-  readonly weekStart: number;
-  readonly weekEnd: number;
-  readonly isDeload: boolean;
-}
-
-function isWeekDeload(week: number, phases: ReadonlyArray<PhaseInfo>): boolean {
+// Semana excluida da tendencia: deload OU taper. A queda numa semana dessas e
+// PLANO — recuperacao (deload) ou pico com corte de volume (taper) —, nunca
+// regressao (I-14, estendido a taper pelo red team B2).
+function isWeekExcluded(week: number, phases: ReadonlyArray<PhaseInfo>): boolean {
   return phases.some(
-    (p) => p.isDeload && week >= p.weekStart && week <= p.weekEnd,
+    (p) => (p.isDeload || p.isTaper) && week >= p.weekStart && week <= p.weekEnd,
   );
 }
 
 /**
  * Classifica tendencia da serie de cargas semanais. Semanas marcadas
- * `isDeload=true` na lista de fases sao EXCLUIDAS do calculo (I-14).
+ * `isDeload=true` OU `isTaper=true` na lista de fases sao EXCLUIDAS do
+ * calculo (I-14 + B2).
  */
 export function computeTrend(
   volumes: ReadonlyArray<WeeklyVolume>,
   phases: ReadonlyArray<PhaseInfo>,
 ): TrendClassification {
-  const usable = volumes.filter((v) => !isWeekDeload(v.week, phases));
+  const usable = volumes.filter((v) => !isWeekExcluded(v.week, phases));
   if (usable.length < 2) return "stable";
 
   const sorted = [...usable].sort((a, b) => a.week - b.week);
