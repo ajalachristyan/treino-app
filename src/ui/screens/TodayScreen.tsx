@@ -23,6 +23,7 @@ import {
 import { downloadBackup } from "../../data/backup.ts";
 import { useDb } from "../db/DbProvider.tsx";
 import { BlockCard } from "../components/BlockCard.tsx";
+import { PhaseBanner } from "../components/PhaseBanner.tsx";
 
 const DAY_MS = 86400000;
 
@@ -183,6 +184,7 @@ export function TodayScreen({
       {view.kind === "active" && (
         <>
           <p className="sub">{view.label}</p>
+          <PhaseBanner />
           <div className="btn-row">
             <button type="button" className="btn btn-primary" onClick={onStart}>
               Iniciar treino

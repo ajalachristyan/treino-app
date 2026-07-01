@@ -11,6 +11,7 @@ import {
 import { type LiveItem } from "../session/sessionModel.ts";
 import { SetInput } from "../session/SetInput.tsx";
 import { ExercisePicker } from "../session/ExercisePicker.tsx";
+import { PhaseBanner } from "../components/PhaseBanner.tsx";
 import type { DeviationReason } from "../../domain/types.ts";
 import { formatMeasures, formatDuration } from "../labels.ts";
 
@@ -241,6 +242,8 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
           <LiveClock since={api.lastSetAt ?? api.startedAt} label="descanso" />
         </div>
       )}
+
+      <PhaseBanner />
 
       {api.warning !== null && (
         <div className="error-box" role="status">

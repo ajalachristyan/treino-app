@@ -340,6 +340,30 @@ button {
   margin-top: var(--sp-6);
 }
 
+/* Aviso de fase (deload/taper) — nota de treino proeminente, cor de atencao. */
+.phase-banner {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  color: var(--warn-text);
+  line-height: 1.5;
+  box-shadow: var(--shadow-1);
+}
+.phase-banner strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: var(--sp-1);
+}
+.phase-banner p {
+  margin: 0;
+  font-size: 14px;
+}
+.phase-banner b {
+  color: var(--accent-soft);
+}
+
 .section-title {
   font-size: 18px;
   font-weight: 700;

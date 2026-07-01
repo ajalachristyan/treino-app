@@ -58,3 +58,14 @@ export const LOAD_DROP_THRESHOLD_PCT = 0.30;
 
 /** TODO: revisar. Queda relativa em tendencia que classifica "regressao" (fora de deload). */
 export const TREND_REGRESSION_THRESHOLD_PCT = 0.15;
+
+/**
+ * TODO: revisar (dono valida). Fracao da carga NORMAL a sugerir numa semana de
+ * deload AGENDADO (0.85 = ~15% mais leve). So DELOAD reduz carga; o TAPER mantem
+ * a intensidade (reduz volume, nao carga) — por isso a sugestao de carga nao se
+ * aplica a taper.
+ */
+export const DELOAD_LOAD_FACTOR = 0.85;
+
+/** TODO: revisar (dono valida). Quantas series a menos sugerir numa semana de deload/taper (reduz volume). */
+export const DELOAD_SETS_DROP = 1;
