@@ -9,7 +9,8 @@ import {
 import { isStartDateSet } from "../../data/planConfig.ts";
 import {
   DELOAD_LOAD_FACTOR,
-  DELOAD_SETS_DROP,
+  DELOAD_VOLUME_FACTOR,
+  TAPER_VOLUME_FACTOR,
 } from "../../domain/constants.ts";
 import { useDb } from "../db/DbProvider.tsx";
 
@@ -51,29 +52,30 @@ export function PhaseBanner() {
 
   if (kind === "none") return null;
 
-  const sets = DELOAD_SETS_DROP === 1 ? "1 série" : `${DELOAD_SETS_DROP} séries`;
-  // % de alivio derivado da constante (fonte unica) — nao chumbar no texto.
-  const loadDropPct = Math.round((1 - DELOAD_LOAD_FACTOR) * 100);
+  // % derivados das constantes (fonte unica) — nunca chumbar no texto.
+  const deloadLoadDrop = Math.round((1 - DELOAD_LOAD_FACTOR) * 100);
+  const deloadVolDrop = Math.round((1 - DELOAD_VOLUME_FACTOR) * 100);
+  const taperVolDrop = Math.round((1 - TAPER_VOLUME_FACTOR) * 100);
 
   return (
     <div className="phase-banner" role="status">
       {kind === "deload" ? (
         <>
-          <strong>Semana de deload (recuperação).</strong>
+          <strong>Semana de deload (recuperação do sistema nervoso).</strong>
           <p>
-            Não é semana de recorde. Alivie: cerca de{" "}
-            <b>{loadDropPct}% menos carga</b> e <b>{sets} a menos</b> por
-            exercício. É a semana em que o corpo
-            assimila o treino — pegar leve aqui faz você voltar mais forte.
+            Corte forte: cerca de <b>{deloadVolDrop}% menos volume</b> e{" "}
+            <b>{deloadLoadDrop}% menos carga</b>. <b>Nada de pliometria nem
+            explosivo</b> — troque por técnica leve de ginástica. Não é semana de
+            recorde: pegar leve aqui é o que faz você voltar mais forte.
           </p>
         </>
       ) : (
         <>
           <strong>Semana de taper (afiar pro pico).</strong>
           <p>
-            <b>Mantenha a carga</b> (a intensidade), mas reduza o <b>volume</b>:{" "}
-            {sets} a menos por exercício. A ideia é chegar descansado e forte,
-            não cansado.
+            <b>Mantenha a carga</b> (a intensidade), mas corte cerca de{" "}
+            <b>{taperVolDrop}% do volume</b> de pesos. Não persiga máximo — a meta
+            é chegar com o sistema nervoso descansado pro pico de salto.
           </p>
         </>
       )}

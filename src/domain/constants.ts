@@ -60,12 +60,19 @@ export const LOAD_DROP_THRESHOLD_PCT = 0.30;
 export const TREND_REGRESSION_THRESHOLD_PCT = 0.15;
 
 /**
- * TODO: revisar (dono valida). Fracao da carga NORMAL a sugerir numa semana de
- * deload AGENDADO (0.85 = ~15% mais leve). So DELOAD reduz carga; o TAPER mantem
- * a intensidade (reduz volume, nao carga) — por isso a sugestao de carga nao se
- * aplica a taper.
+ * Deload AGENDADO (semanas 6/10/18). O plano manda corte FORTE: ~50% de volume
+ * E de carga, trocando o estimulo por tecnica leve (sem pliometria/explosivo) —
+ * e recuperacao de SNC, nao um alivio pequeno.
+ * Fonte: plano-vertical-grade-operacional.md:13 ("corta ~50% de volume e carga;
+ * ginastica tecnica"). Ainda "dono valida" (DECISIONS, Divida 2), mas agora
+ * derivado do doc, nao chutado.
  */
-export const DELOAD_LOAD_FACTOR = 0.85;
+export const DELOAD_LOAD_FACTOR = 0.5; // ~50% da carga normal
+export const DELOAD_VOLUME_FACTOR = 0.5; // ~50% do volume normal
 
-/** TODO: revisar (dono valida). Quantas series a menos sugerir numa semana de deload/taper (reduz volume). */
-export const DELOAD_SETS_DROP = 1;
+/**
+ * Taper (semanas 16-17, pico). Diferente do deload: MANTEM a carga/intensidade
+ * e corta ~60% do VOLUME de pesos, pra pico de excitabilidade do SNC.
+ * Fonte: plano-vertical-grade-operacional.md:70 ("corta ~60% do volume de pesos").
+ */
+export const TAPER_VOLUME_FACTOR = 0.4; // mantem ~40% do volume = corta ~60%
