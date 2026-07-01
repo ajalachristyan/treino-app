@@ -37,7 +37,13 @@
   --touch: 48px;
 
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", monospace;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", monospace;
+
+  /* elevacao + destaque (o app e um instrumento: profundidade sutil, numero em
+     evidencia). --amber marca o descanso; verde marca trabalho/feito. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --amber: #f2b84b;
 }
 
 * {
@@ -48,7 +54,14 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  /* leve halo no topo da tela: profundidade sem ruido, some para o preto base */
+  background: radial-gradient(
+      1100px 520px at 50% -8%,
+      #141b28 0%,
+      var(--bg) 58%
+    )
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
@@ -57,6 +70,16 @@ body {
 
 button {
   font-family: inherit;
+}
+
+/* Acessibilidade: quem pediu menos movimento no sistema nao ganha as transicoes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 /* ---- Shell ---------------------------------------------------------------- */
@@ -89,15 +112,16 @@ button {
 }
 
 .h1 {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   margin: 0 0 var(--sp-2);
 }
 .sub {
   font-size: 14px;
   color: var(--text-muted);
   margin: 0 0 var(--sp-5);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 .muted {
   color: var(--text-muted);
@@ -112,9 +136,11 @@ button {
   display: flex;
   background: var(--surface);
   border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.35);
   padding-bottom: env(safe-area-inset-bottom);
 }
 .navbtn {
+  position: relative;
   flex: 1;
   appearance: none;
   border: none;
@@ -126,9 +152,21 @@ button {
   padding: var(--sp-3) var(--sp-1);
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.12s ease;
 }
 .navbtn[aria-current="page"] {
   color: var(--accent-soft);
+}
+/* barrinha de acento no topo da aba ativa (indicador claro, sem icone) */
+.navbtn[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 22%;
+  right: 22%;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
 }
 
 /* ---- Cards / linhas ------------------------------------------------------- */
@@ -138,6 +176,7 @@ button {
   border-radius: var(--radius);
   padding: var(--sp-4);
   margin-bottom: var(--sp-4);
+  box-shadow: var(--shadow-1);
 }
 .card-title {
   font-size: 17px;
@@ -217,14 +256,22 @@ button {
   cursor: pointer;
   min-height: 56px;
   width: 100%;
+  box-shadow: var(--shadow-1);
+  transition: transform 0.06s ease, filter 0.12s ease;
 }
 .btn:active {
-  filter: brightness(1.2);
+  transform: translateY(1px);
+  filter: brightness(1.18);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
 }
 .btn-primary {
   border-color: var(--accent);
-  background: #1c2b1c;
+  background: linear-gradient(180deg, #21361f, #16281a);
   color: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(63, 185, 80, 0.18), var(--shadow-1);
 }
 .btn-row {
   display: flex;
@@ -250,9 +297,14 @@ button {
   min-width: var(--touch);
   min-height: var(--touch);
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 0.06s ease;
+}
+.weekchip:active {
+  transform: translateY(1px);
 }
 .weekchip[aria-pressed="true"] {
   border-color: var(--accent);
@@ -300,6 +352,47 @@ button {
 /* =============================================================================
    Sessao ao vivo (Bloco D)
    ============================================================================= */
+
+/* Cronometros — a "assinatura" do app: numero grande, monospacado e tabular,
+   como um cronometro de verdade. Treino (verde) = tempo total; descanso (ambar)
+   = desde a ultima serie. */
+.timers {
+  display: flex;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-5);
+}
+.timer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  box-shadow: var(--shadow-1);
+}
+.timer-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.timer-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+.timer:first-child .timer-value {
+  color: var(--accent-soft);
+}
+.timer:nth-child(2) .timer-value {
+  color: var(--amber);
+}
 
 .field {
   display: flex;
@@ -408,10 +501,14 @@ button {
   margin: var(--sp-3) 0;
   padding-left: var(--sp-5);
   font-size: 15px;
+  font-family: var(--font-mono);
 }
 .setlist li {
-  padding: 2px 0;
+  padding: 3px 0;
   font-variant-numeric: tabular-nums;
+}
+.setlist li::marker {
+  color: var(--accent);
 }
 .item-actions {
   margin-top: var(--sp-3);
@@ -644,13 +741,14 @@ button {
   margin-top: var(--sp-2);
 }
 .hist-set {
+  font-family: var(--font-mono);
   font-size: 14px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
+  color: var(--text);
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 2px var(--sp-2);
+  padding: 3px var(--sp-2);
 }
 .edit-form {
   display: flex;
