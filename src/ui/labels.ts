@@ -31,6 +31,16 @@ export function formatMeasures(m: SetMeasures): string {
   }
 }
 
+/** Duracao a partir de ms: "M:SS" ate 1h, senao "Hh MMm". Clampa negativos a 0. */
+export function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 const WEEKDAYS_PT = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
 /** Data/hora local de uma sessao, leiga (ex.: "ter 30/06 · 14:32"). */

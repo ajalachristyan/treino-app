@@ -52,6 +52,9 @@ export interface LiveSessionApi {
   phase: SessionPhase;
   hasActive: boolean;
   todayLabel: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  lastSetAt: number | null;
   items: LiveItem[];
   warning: InterferenceWarning | null;
   error: string | null;
@@ -75,6 +78,10 @@ export function useLiveSession(): LiveSessionApi {
   const [warning, setWarning] = useState<InterferenceWarning | null>(null);
   const [todayLabel, setTodayLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Cronometros: inicio da sessao (tempo total) e ultima serie logada (descanso).
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [endedAt, setEndedAt] = useState<number | null>(null);
+  const [lastSetAt, setLastSetAt] = useState<number | null>(null);
 
   const itemsRef = useRef<LiveItem[]>([]);
   const sessionIdRef = useRef<string | null>(null);
@@ -132,6 +139,9 @@ export function useLiveSession(): LiveSessionApi {
         const sid = await sessions.startTodaySession(db, { planId: null, workBlockId: null, now: now.getTime() });
         sessionIdRef.current = sid;
         seqRef.current = 1;
+        setStartedAt(now.getTime());
+        setEndedAt(null);
+        setLastSetAt(now.getTime());
         commit([]);
         setWarning(null);
         setTodayLabel("Sessao livre");
@@ -161,6 +171,9 @@ export function useLiveSession(): LiveSessionApi {
 
       sessionIdRef.current = sid;
       seqRef.current = 1;
+      setStartedAt(now.getTime());
+      setEndedAt(null);
+      setLastSetAt(now.getTime());
       commit(plannedToLiveItems(planned));
       setWarning(w);
       setTodayLabel(block ? `Semana ${week} · ${phaseName}` : "Sessao livre (sem bloco hoje)");
@@ -219,6 +232,9 @@ export function useLiveSession(): LiveSessionApi {
 
       sessionIdRef.current = active.id;
       seqRef.current = maxSeq + 1; // proximo seq fica acima de tudo que existe
+      setStartedAt(active.started_at);
+      setEndedAt(null);
+      setLastSetAt(Date.now()); // descanso reconta a partir da retomada
       commit([...persistedLive, ...untouched]);
       setWarning(null);
       setTodayLabel("Sessao retomada");
@@ -256,6 +272,7 @@ export function useLiveSession(): LiveSessionApi {
             sets: [...it.sets, { setIndex, measures, rpe }],
           })),
         );
+        setLastSetAt(now); // zera o cronometro de descanso
       }),
     [db, run, commit, takeSeq],
   );
@@ -372,7 +389,9 @@ export function useLiveSession(): LiveSessionApi {
     return run(async () => {
       const sid = sessionIdRef.current;
       if (sid === null) return;
-      await sessions.endSession(db, sid, Date.now());
+      const now = Date.now();
+      await sessions.endSession(db, sid, now);
+      setEndedAt(now);
       sessionIdRef.current = null;
       setPhase("ended");
       setHasActive(false);
@@ -387,6 +406,9 @@ export function useLiveSession(): LiveSessionApi {
       await sessions.discardSession(db, sid);
       sessionIdRef.current = null;
       seqRef.current = 1;
+      setStartedAt(null);
+      setEndedAt(null);
+      setLastSetAt(null);
       commit([]);
       setWarning(null);
       setHasActive(false);
@@ -398,6 +420,9 @@ export function useLiveSession(): LiveSessionApi {
     phase,
     hasActive,
     todayLabel,
+    startedAt,
+    endedAt,
+    lastSetAt,
     items,
     warning,
     error,

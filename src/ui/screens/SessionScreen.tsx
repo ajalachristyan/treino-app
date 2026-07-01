@@ -12,7 +12,23 @@ import { type LiveItem } from "../session/sessionModel.ts";
 import { SetInput } from "../session/SetInput.tsx";
 import { ExercisePicker } from "../session/ExercisePicker.tsx";
 import type { DeviationReason } from "../../domain/types.ts";
-import { formatMeasures } from "../labels.ts";
+import { formatMeasures, formatDuration } from "../labels.ts";
+
+// Cronometro que anda: mostra o tempo decorrido desde `since` (ms), atualizando
+// a cada segundo. Usado para o tempo total de treino e para o descanso.
+function LiveClock({ since, label }: { since: number; label: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="timer">
+      <span className="timer-label">{label}</span>
+      <span className="timer-value">{formatDuration(now - since)}</span>
+    </div>
+  );
+}
 
 const SKIP_REASONS: ReadonlyArray<readonly [DeviationReason, string]> = [
   ["equipment_busy", "equip. ocupado"],
@@ -194,8 +210,12 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
       <div className="screen">
         <h1 className="h1">Treino registrado ✓</h1>
         <p className="sub">
-          {logged} exercicio(s) com series. Salvo no aparelho — aparece em
-          Histórico. Se a folha de salvar não abriu, baixe a cópia aqui.
+          {logged} exercicio(s) com series
+          {api.startedAt !== null && api.endedAt !== null
+            ? ` · durou ${formatDuration(api.endedAt - api.startedAt)}`
+            : ""}
+          . Salvo no aparelho — aparece em Histórico. Se a folha de salvar não
+          abriu, baixe a cópia aqui.
         </p>
         <div className="btn-row">
           <button type="button" className="btn" onClick={() => void downloadBackup(db)}>
@@ -214,6 +234,13 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
     <div className="screen">
       <h1 className="h1">Treino</h1>
       <p className="sub">{api.todayLabel}</p>
+
+      {api.startedAt !== null && (
+        <div className="timers">
+          <LiveClock since={api.startedAt} label="treino" />
+          <LiveClock since={api.lastSetAt ?? api.startedAt} label="descanso" />
+        </div>
+      )}
 
       {api.warning !== null && (
         <div className="error-box" role="status">

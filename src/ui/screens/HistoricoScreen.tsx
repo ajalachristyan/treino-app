@@ -10,7 +10,7 @@ import {
   type SessionItemRow,
 } from "../../data/sessions.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
-import { formatMeasures, formatSessionDate } from "../labels.ts";
+import { formatMeasures, formatSessionDate, formatDuration } from "../labels.ts";
 
 // Um item da sessao ja com suas series resolvidas (para exibir).
 interface ItemView {
@@ -53,6 +53,7 @@ function SessionCard({ session }: { session: FinishedSessionRow }) {
       <h2 className="card-title">{formatSessionDate(session.started_at)}</h2>
       <p className="card-meta">
         {session.work_block_name ?? "Sessao livre"}
+        {` · durou ${formatDuration(session.ended_at - session.started_at)}`}
         {items !== null ? ` · ${logged} exercicio(s)` : ""}
       </p>
 
