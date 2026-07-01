@@ -109,6 +109,26 @@ export const BASELINE_MIN_SESSIONS = 3;
  */
 export const PROGRESSION_MIN_SETS_FRACTION = 2 / 3;
 
+// ----------------------------------------------------------------------------
+// Camada de aderencia + prontidao (spec docs/superpowers/specs/2026-07-01).
+// Avisos advisory (anti-culpa §6.3): sugerem, nunca punem nem bloqueiam o log.
+// ----------------------------------------------------------------------------
+
+/**
+ * Aderencia da fase abaixo desta fracao dispara aviso suave ("voce esta atras").
+ * Tambem serve de piso de BASE para liberar a fase de risco (Mes 3 / depth
+ * jumps): base primary abaixo disto => aviso firme antes do trabalho perigoso.
+ * Placeholder ~0.6; dono valida. Fonte: spec camada de aderencia 2026-07-01.
+ */
+export const PHASE_ADHERENCE_WARN_PCT = 0.6;
+
+/**
+ * Numero de vezes SEGUIDAS que um exercicio PRIMARY (back squat, saltos) pode
+ * ser largado antes de o app avisar/sugerir. Largar accessory/finisher nao
+ * conta (graus de importancia). Placeholder; dono valida. Fonte: spec 2026-07-01.
+ */
+export const KEY_EXERCISE_NEGLECT_STREAK = 3;
+
 /**
  * Gap de calendario (dias) entre duas sessoes acima do qual a sequencia de
  * quedas QUEBRA — contar por semana de calendario real, nao por adjacencia de
