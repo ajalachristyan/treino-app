@@ -6,6 +6,7 @@
 // Expansao para item 6 do brief §12.
 // =============================================================================
 
+import { PROGRESSION_MIN_SETS_FRACTION } from "../../domain/constants.ts";
 import type { SessionItemStatus } from "../../domain/types.ts";
 
 export interface SetData {
@@ -39,6 +40,11 @@ const NON_EXECUTED_STATUSES: ReadonlyArray<SessionItemStatus> = [
  * Devolve true se o exercicio deve progredir (regra: dupla progressao —
  * topo do rep_range em TODAS as series de trabalho na execucao mais recente).
  *
+ * TRAVA (dono 2026-07-01): quando `prescribedSets` e conhecido, so progride se
+ * a MAIORIA (~`PROGRESSION_MIN_SETS_FRACTION`) das series prescritas foi
+ * cumprida — sessao pela metade nao ganha carga. Sem `prescribedSets` (NULL no
+ * seed para salto/mobilidade/core), degrada pro criterio classico.
+ *
  * I-7: itens com isWarmup=true sao ignorados (warmup nao conta).
  * I-15: a busca eh por `exerciseId` no campo ATUAL (`exerciseId`); itens
  *       cujo exercicio_id atual eh diferente do procurado nao entram.
@@ -52,6 +58,7 @@ export function shouldProgressExercise(
   exerciseId: string,
   history: ReadonlyArray<SessionItemHistory>,
   repRange: { readonly min: number; readonly max: number },
+  prescribedSets?: number | null,
 ): boolean {
   // Marca expressa: items nao-executados (skipped/deferred) jamais progridem.
   // Nao precisamos filtrar — basta nao incluir; abaixo so includes statuses
@@ -70,6 +77,13 @@ export function shouldProgressExercise(
   const latest = executed[executed.length - 1];
   if (!latest) return false;
   if (latest.sets.length === 0) return false;
+
+  // TRAVA de sessao parcial: com alvo de series conhecido, exige a maioria das
+  // series prescritas (~2/3). Sem alvo (NULL), pula a trava.
+  if (prescribedSets != null && prescribedSets > 0) {
+    const required = Math.ceil(PROGRESSION_MIN_SETS_FRACTION * prescribedSets);
+    if (latest.sets.length < required) return false;
+  }
 
   return latest.sets.every((s) => s.reps >= repRange.max);
 }

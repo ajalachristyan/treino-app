@@ -100,6 +100,16 @@ export const BASELINE_WINDOW_SESSIONS = 6;
 export const BASELINE_MIN_SESSIONS = 3;
 
 /**
+ * Trava de progressao: fracao MINIMA das series prescritas que precisa ser
+ * cumprida (todas no topo da faixa) para a carga progredir (+incremento). "A
+ * maioria (~2/3)" — tolera perder 1 serie, mas sessao pela metade NAO ganha
+ * carga (decisao do dono 2026-07-01: pular caminho nao conta como progressao).
+ * So aplica quando ha `planned_sets` conhecido; senao degrada pro criterio
+ * classico (todas as series feitas no topo). Placeholder; dono valida.
+ */
+export const PROGRESSION_MIN_SETS_FRACTION = 2 / 3;
+
+/**
  * Gap de calendario (dias) entre duas sessoes acima do qual a sequencia de
  * quedas QUEBRA — contar por semana de calendario real, nao por adjacencia de
  * array (red team S1). Forca e ~2x/sem (gap tipico 3-4 dias); >14 dias e uma
