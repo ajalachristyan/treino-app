@@ -146,3 +146,73 @@ export const MAX_SESSION_GAP_DAYS = 14;
  * sessao real (sRPE 10 x 300 min). Placeholder; dono valida. Fonte: §7.3 L3.
  */
 export const LOAD_SANITY_CAP = 3000;
+
+// ----------------------------------------------------------------------------
+// Molde de prescricao por fase (prescription.ts — plano do motor §7.3 L6).
+// Overlay de LEITURA na forca primaria; o dono digita o kg (sem e1RM). Numeros
+// ⚑ = ciencia/decisao do dono, validados pelo COMPORTAMENTO nos testes (nunca
+// pelo valor cru).
+// ----------------------------------------------------------------------------
+
+/**
+ * M1 (Estrutura, sem 1-5) — faixa de reps da fase para a FORCA PRIMARIA (back
+ * squat, zercher). Minimo 5 e do DONO (plano-vertical), NAO os 6 do Rivera;
+ * topo 8 = Rivera "6-8". Dupla progressao: sobe carga ao bater o topo na maioria
+ * das series (ver PROGRESSION_MIN_SETS_FRACTION).
+ * Fonte: plano-vertical-grade-operacional.md:58 ("Back squat pesado, faixas 5-8,
+ * dupla progressao") + pesquisa-rivera-transcricoes.md:54-55 ("three to four sets
+ * of six to eight reps, week one eight week two seven week three six"). Ciencia — dono valida.
+ */
+export const M1_REP_RANGE: { readonly min: number; readonly max: number } = {
+  min: 5,
+  max: 8,
+};
+
+/**
+ * M2 (Potencia/RFD, sem 7-9) — faixa PESADA da fase para a forca primaria (onda
+ * 6->5->4). Decisao do DONO em 2026-07-01 (handoff §2) SOBREPOE o "VBT 3x3 leve
+ * @60-70%" escrito em plano-vertical-grade-operacional.md:63: o dono trocou pelo
+ * Rivera pesado. SEM % (o dono digita o kg; nao ha e1RM).
+ * Fonte: pesquisa-rivera-transcricoes.md:58-59 ("four to six reps, week one six
+ * week two five week three four"). Ciencia + decisao do dono — dono valida.
+ */
+export const M2_REP_RANGE: { readonly min: number; readonly max: number } = {
+  min: 4,
+  max: 6,
+};
+
+/**
+ * M3 (Peaking, sem 11-15) — PAP (potenciacao pos-ativacao) na forca primaria:
+ * 2 series x 2 reps, dica @~85% (so lembrete de tela; NAO ha e1RM — o dono
+ * digita o kg). Esquema do DONO, nao os triplos pesados do Rivera (o dono so
+ * trocou o M2). Fixo: nao entra na dupla progressao.
+ * Fonte: plano-vertical-grade-operacional.md:68 ("PAP: agachamento 2x2 @ ~85%").
+ * Dono valida.
+ */
+export const M3_PAP_SETS = 2;
+export const M3_PAP_REPS = 2;
+
+/**
+ * Dica de intensidade do PAP (M3). So exibicao — nunca vira carga por e1RM.
+ * Fonte: plano-vertical-grade-operacional.md:68 ("@ ~85%"). Ciencia — dono valida.
+ */
+export const M3_PAP_INTENSITY_PCT = 0.85;
+
+/**
+ * Incremento de carga quando a dupla progressao dispara (bateu o topo da faixa
+ * na maioria das series). Menor salto do "+2,5-5 kg" do plano — conservador.
+ * Fonte: plano-vertical-grade-operacional.md:11 ("+2,5-5 kg na proxima"). Dono valida.
+ */
+export const LOAD_INCREMENT_KG = 2.5;
+
+/**
+ * function_tags que marcam a FORCA PRIMARIA que recebe o molde por fase
+ * (M1/M2/M3). No seed: back squat (forca_maxima_agachamento, Ter/FORCA) e
+ * zercher leve (forca_geral_zercher, Sab). O bucket e por TAG, nao por priority
+ * — ex.: drop landing e priority=primary mas e plio, e NAO entra aqui.
+ * Fonte: migrations/002_seed_plan.sql:33,68 + handoff §2. Dono valida.
+ */
+export const PRIMARY_STRENGTH_FUNCTION_TAGS: readonly string[] = [
+  "forca_maxima_agachamento",
+  "forca_geral_zercher",
+];

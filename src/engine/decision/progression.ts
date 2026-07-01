@@ -37,6 +37,30 @@ const NON_EXECUTED_STATUSES: ReadonlyArray<SessionItemStatus> = [
 ];
 
 /**
+ * Ocorrencia EXECUTADA mais recente de um exercicio no historico (assumido
+ * cronologico). "Executada" = status implica execucao (done/substituted/
+ * reordered/added_adhoc) e nao e warmup (I-7). Fonte UNICA da regra "o que conta
+ * como execucao" — reusada por shouldProgressExercise e pela prescricao
+ * (memoria de carga em prescription.ts).
+ */
+export function latestExecutedOccurrence(
+  exerciseId: string,
+  history: ReadonlyArray<SessionItemHistory>,
+): SessionItemHistory | undefined {
+  let latest: SessionItemHistory | undefined;
+  for (const item of history) {
+    if (
+      item.exerciseId === exerciseId &&
+      EXECUTED_STATUSES.includes(item.status) &&
+      !item.isWarmup
+    ) {
+      latest = item; // cronologico: mantem a ultima ocorrencia executada
+    }
+  }
+  return latest;
+}
+
+/**
  * Devolve true se o exercicio deve progredir (regra: dupla progressao —
  * topo do rep_range em TODAS as series de trabalho na execucao mais recente).
  *
@@ -65,16 +89,8 @@ export function shouldProgressExercise(
   // de execucao.
   void NON_EXECUTED_STATUSES; // documentacao explicita; nao usado em runtime.
 
-  const executed = history.filter(
-    (i) =>
-      i.exerciseId === exerciseId &&
-      EXECUTED_STATUSES.includes(i.status) &&
-      !i.isWarmup,
-  );
-  if (executed.length === 0) return false;
-
-  // Usa a execucao mais recente (assumimos history ordenada por tempo).
-  const latest = executed[executed.length - 1];
+  // Usa a execucao mais recente (fonte unica da regra de "executado").
+  const latest = latestExecutedOccurrence(exerciseId, history);
   if (!latest) return false;
   if (latest.sets.length === 0) return false;
 
