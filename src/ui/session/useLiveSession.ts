@@ -33,6 +33,7 @@ import {
   plannedToLiveItems,
   moveItem,
   patchItem,
+  applySubstitution,
   type LiveItem,
 } from "./sessionModel.ts";
 import type {
@@ -340,15 +341,9 @@ export function useLiveSession(): LiveSessionApi {
           now: Date.now(),
         });
         commit(
-          patchItem(itemsRef.current, localKey, (it) => ({
-            ...it,
-            sessionItemId: newItemId,
-            exerciseId: sub.exerciseId,
-            exerciseName: sub.exerciseName,
-            progressionType: sub.progressionType,
-            status: "substituted",
-            sets: [],
-          })),
+          patchItem(itemsRef.current, localKey, (it) =>
+            applySubstitution(it, sub, newItemId),
+          ),
         );
       });
     },

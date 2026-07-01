@@ -2,13 +2,26 @@ import { useEffect, useState } from "react";
 
 import { useDb } from "../db/DbProvider.tsx";
 import { downloadBackup } from "../../data/backup.ts";
-import { suggestSubstitutes, lastMeasuresFor } from "../../data/sessions.ts";
+import {
+  suggestSubstitutes,
+  lastMeasuresFor,
+  executionHistoryFor,
+} from "../../data/sessions.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
 import {
   useLiveSession,
   type ExerciseChoice,
 } from "../session/useLiveSession.ts";
-import { type LiveItem } from "../session/sessionModel.ts";
+import {
+  type LiveItem,
+  sessionSuggestion,
+  applyPrescriptionToPrefill,
+} from "../session/sessionModel.ts";
+import type {
+  Prescription,
+  RecoveryReason,
+} from "../../engine/decision/prescription.ts";
+import type { PhaseEmphasis, PhaseKind } from "../../engine/decision/phase.ts";
 import { SetInput } from "../session/SetInput.tsx";
 import { ExercisePicker } from "../session/ExercisePicker.tsx";
 import { PhaseBanner } from "../components/PhaseBanner.tsx";
@@ -37,16 +50,79 @@ const SKIP_REASONS: ReadonlyArray<readonly [DeviationReason, string]> = [
   ["user_choice", "escolha"],
 ];
 
+// Quantas execucoes recentes o motor olha (so a mais recente pesa na sugestao;
+// margem por seguranca).
+const SUGGESTION_HISTORY_N = 8;
+
+const PHASE_LABEL: Record<PhaseEmphasis, string> = {
+  m1: "Mês 1",
+  m2: "Mês 2",
+  m3: "Mês 3",
+};
+
+const RECOVERY_NOTE: Record<RecoveryReason, string> = {
+  none: "",
+  deload: "deload — leve, ajuste à vontade",
+  taper: "taper — mantém a carga, menos volume",
+  reactive_deload: "recuo — pegou leve",
+};
+
+// "Sugestão de hoje" = overlay da fase (memoria x intencao). SO exibe; o dono
+// confirma logando (ou ajusta) no SetInput abaixo. Nunca bloqueia (anti-culpa).
+function SuggestionLine({
+  suggestion,
+  phaseEmphasis,
+}: {
+  suggestion: Prescription;
+  phaseEmphasis: PhaseEmphasis | null;
+}) {
+  const { mode, sets, repRange, suggestedLoadKg, intensityHintPct, recovery } =
+    suggestion;
+  const phaseLabel = phaseEmphasis !== null ? PHASE_LABEL[phaseEmphasis] : "";
+  const setsPart = sets !== null ? `${String(sets)}×` : "";
+  const repsPart =
+    repRange !== null
+      ? repRange.min === repRange.max
+        ? String(repRange.max)
+        : `${String(repRange.min)}–${String(repRange.max)}`
+      : "";
+  const loadPart =
+    suggestedLoadKg !== null
+      ? `${String(suggestedLoadKg)} kg`
+      : intensityHintPct !== null
+        ? `@~${String(Math.round(intensityHintPct * 100))}% · defina o kg`
+        : "defina o kg";
+  const recoveryNote = RECOVERY_NOTE[recovery];
+  return (
+    <div className="suggestion">
+      <strong>Sugestão de hoje</strong>
+      <span className="suggestion-body">
+        {phaseLabel !== "" ? `${phaseLabel} · ` : ""}
+        {mode === "peak_pap" ? "PAP " : ""}
+        {setsPart} {repsPart} · {loadPart}
+      </span>
+      {recoveryNote !== "" && (
+        <span className="badge badge-deload">{recoveryNote}</span>
+      )}
+      <span className="suggestion-hint">confirme ou ajuste abaixo</span>
+    </div>
+  );
+}
+
 function ItemCard({
   item,
   index,
   total,
   api,
+  phaseEmphasis,
+  phaseKind,
 }: {
   item: LiveItem;
   index: number;
   total: number;
   api: ReturnType<typeof useLiveSession>;
+  phaseEmphasis: PhaseEmphasis | null;
+  phaseKind: PhaseKind | null;
 }) {
   const db = useDb();
   const [skipping, setSkipping] = useState(false);
@@ -56,18 +132,33 @@ function ItemCard({
     loaded: boolean;
     measures: SetMeasures | undefined;
   }>({ loaded: false, measures: undefined });
+  const [suggestion, setSuggestion] = useState<Prescription | null>(null);
 
-  // Memoria de carga: pre-preenche o input com a ultima execucao do exercicio.
+  // Memoria de carga X intencao da fase: pre-preenche o input com a ultima
+  // execucao, sobrescrevendo SO a carga pela sugestao da fase (se houver). Sem
+  // historico => em branco. Deps por exerciseId (o substituto muda o id e
+  // re-dispara). SO exibe/pre-preenche; o dono confirma logando.
   useEffect(() => {
     let alive = true;
     setPrefill({ loaded: false, measures: undefined });
-    void lastMeasuresFor(db, item.exerciseId).then((m) => {
-      if (alive) setPrefill({ loaded: true, measures: m });
+    setSuggestion(null);
+    void Promise.all([
+      lastMeasuresFor(db, item.exerciseId),
+      executionHistoryFor(db, item.exerciseId, SUGGESTION_HISTORY_N),
+    ]).then(([base, history]) => {
+      if (!alive) return;
+      const presc = sessionSuggestion(item, phaseEmphasis, phaseKind, history);
+      setSuggestion(presc);
+      setPrefill({
+        loaded: true,
+        measures: applyPrescriptionToPrefill(base, presc),
+      });
     });
     return () => {
       alive = false;
     };
-  }, [db, item.exerciseId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, item.exerciseId, phaseEmphasis, phaseKind]);
 
   const isSkipped = item.status === "skipped";
   const isPlanned = item.status === "planned";
@@ -113,6 +204,12 @@ function ItemCard({
           ))}
         </ol>
       )}
+
+      {!isSkipped &&
+        suggestion !== null &&
+        suggestion.mode !== "pass_through" && (
+          <SuggestionLine suggestion={suggestion} phaseEmphasis={phaseEmphasis} />
+        )}
 
       {!isSkipped && prefill.loaded && (
         <SetInput
@@ -265,7 +362,15 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
       )}
 
       {api.items.map((it, i) => (
-        <ItemCard key={it.localKey} item={it} index={i} total={api.items.length} api={api} />
+        <ItemCard
+          key={it.localKey}
+          item={it}
+          index={i}
+          total={api.items.length}
+          api={api}
+          phaseEmphasis={api.phaseEmphasis}
+          phaseKind={api.phaseKind}
+        />
       ))}
 
       <div className="btn-row backup">
