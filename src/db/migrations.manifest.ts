@@ -35,4 +35,5 @@ export const MIGRATION_MANIFEST: ReadonlyArray<MigrationManifestEntry> = [
   { version: 4, name: "004_exercise_howto" },
   { version: 5, name: "005_seed_howto" },
   { version: 6, name: "006_workblockitem_active" },
+  { version: 7, name: "007_swap_ter_forca" },
 ] as const;
