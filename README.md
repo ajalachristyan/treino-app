@@ -205,34 +205,33 @@ permitidas). Sem lembretes diários — ruído leva ao abandono.
 
 ## Como o backup funciona
 
-> 🟡 **Não implementado ainda.** Esta seção descreve o que o app **vai**
-> fazer (brief §10.5 + [Dívida 3 do DECISIONS.md](./DECISIONS.md)).
-
 **Por que existe:** Safari iOS pode despejar storage de PWAs sob pressão de
-espaço (eviction). Sem backup automático, você pode perder semanas de
-histórico de um momento para outro. **Frequência de uso não é mitigação
-confiável** — só backup é.
+espaço (eviction). Sem backup, você pode perder semanas de histórico de um
+momento para outro. **Frequência de uso não é mitigação confiável** — só
+backup externo é.
 
-**Como vai funcionar (quando a UI existir):**
+**O que já funciona hoje (backup LOCAL):**
 
-1. **Persistência durável**: na primeira vez que você abre o app, ele pede
-   permissão ao navegador para NÃO despejar os dados
-   (`navigator.storage.persist()`). Se o navegador negar, o backup
-   automático abaixo fica ainda mais crítico.
+1. **Persistência durável**: ao abrir o app, ele pede ao navegador para NÃO
+   despejar os dados (`navigator.storage.persist()`) — best-effort, sem
+   travar nada. No iPhone o que de fato protege é **instalar na Tela de
+   Início**; no Chrome/Android o pedido costuma ser concedido.
 
-2. **Backup automático ao fim de cada sessão**: quando você fecha uma sessão
-   de treino (botão "Finalizar"), o app snapshota o estado e envia para o
-   seu **Google Drive** automaticamente. Você não precisa fazer nada — só
-   precisa estar logado no Drive (o que o app pede uma vez).
+2. **Baixar backup (.sql)**: a tela "Hoje" tem o botão **"Baixar backup
+   (.sql)"**, e ao **Finalizar** uma sessão o app baixa um `.sql` sozinho.
+   Guarde esse arquivo **fora do app** (Arquivos / iCloud / Drive, à mão) —
+   é o backup externo que sobrevive a um eviction.
 
-3. **Versões guardadas**: o Drive mantém as **30 versões mais recentes**.
-   Versões com mais de 90 dias ficam **1 por semana** (granularidade
-   semanal sobrevive a perda longa sem virar hoarding).
+3. **Restaurar backup (.sql)**: também na tela "Hoje", **"Restaurar backup
+   (.sql)"** abre um seletor de arquivo. Escolha um `.sql` que o próprio app
+   gerou; ele **avisa que vai apagar o estado atual**, confirma, substitui
+   tudo pelo backup e recarrega. É o caminho de recuperação depois de um
+   eviction (ou troca de aparelho).
 
-4. **Restauração**: se você precisar voltar a uma versão anterior (corrupção,
-   exclusão acidental, troca de aparelho), abra **"Configurações →
-   Restaurar backup"** e escolha a versão pela data. O app substitui o
-   estado atual pelo do backup.
+> 🟡 **Futuro (P3 — ainda NÃO implementado):** backup automático na nuvem
+> (Google Drive), histórico de versões e restauração por data. Hoje o backup
+> é **local e manual**: o arquivo `.sql` que você baixa e guarda. Ver
+> [Dívida 3 do DECISIONS.md](./DECISIONS.md) e brief §10.5.
 
 **O que NÃO é backup neste sistema:** o sync entre dois aparelhos (decisão
 A do Passo 3). Sync resolve "treino no celular, depois mexe no PC"; backup
