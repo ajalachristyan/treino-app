@@ -25,6 +25,7 @@ import { useDb } from "../db/DbProvider.tsx";
 import { BlockCard } from "../components/BlockCard.tsx";
 import { PhaseBanner } from "../components/PhaseBanner.tsx";
 import { ReadinessBanner } from "../components/ReadinessBanner.tsx";
+import { RestoreBackup } from "../components/RestoreBackup.tsx";
 
 const DAY_MS = 86400000;
 
@@ -136,7 +137,8 @@ export function TodayScreen({
       {view.kind === "no-plan" && (
         <div className="card">
           <p className="muted">
-            Nenhum plano no banco. Reinstale o app ou restaure um backup.
+            Nenhum plano no banco. Restaure um backup pelo botão lá embaixo, ou
+            reinstale o app.
           </p>
         </div>
       )}
@@ -264,6 +266,10 @@ export function TodayScreen({
         >
           Baixar backup (.sql)
         </button>
+        {/* Restaurar fica HABILITADO inclusive em no-plan (recuperar OPFS despejado
+            e o caso de uso principal). Ele confirma antes de destruir (anti-culpa) e
+            sobe o `busy` pra congelar os irmaos durante o wipe. */}
+        <RestoreBackup disabled={busy} onBusyChange={setBusy} />
       </div>
     </div>
   );
