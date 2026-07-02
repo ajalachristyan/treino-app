@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { SetMeasures } from "../../data/sessions.ts";
-import type { ProgressionType, QualityPerSet } from "../../domain/types.ts";
+import type { LoadType, ProgressionType, QualityPerSet } from "../../domain/types.ts";
 
 // Campo numerico controlado (string para permitir digitar/limpar).
 function NumField({
@@ -49,13 +49,23 @@ const QUALITIES: ReadonlyArray<readonly [QualityPerSet, string]> = [
  */
 export function SetInput({
   progressionType,
+  loadType,
   prefill,
   onSave,
 }: {
   progressionType: ProgressionType;
+  loadType?: LoadType | undefined;
   prefill?: SetMeasures | undefined;
   onSave: (measures: SetMeasures, rpe: number | null) => void | Promise<void>;
 }) {
+  // Exercicio de peso corporal (pull-up/dips): a "carga" vira toggle "peso
+  // corporal" (loadKg 0) vs "+ lastro" (kg extra). So no load_reps.
+  const isBodyweight = loadType === "bodyweight" && progressionType === "load_reps";
+  const [weighted, setWeighted] = useState(
+    isBodyweight &&
+      prefill?.progressionType === "load_reps" &&
+      prefill.loadKg > 0,
+  );
   // Valores iniciais a partir do prefill (memoria de carga), por TIPO — `a` e o
   // 1o campo do tipo, `b` o 2o (quando ha). Mapear por tipo evita o erro de
   // pegar reps onde o 1o campo e assist.kg (assisted_load).
@@ -105,8 +115,11 @@ export function SetInput({
     switch (progressionType) {
       case "load_reps": {
         const reps = num(a);
+        if (reps === null || reps <= 0) return null;
+        // Peso corporal sem lastro: carga 0 (sempre valida — nao exige o campo).
+        if (isBodyweight && !weighted) return { progressionType, reps, loadKg: 0 };
         const loadKg = num(b);
-        return reps !== null && reps > 0 && loadKg !== null && loadKg >= 0
+        return loadKg !== null && loadKg >= 0
           ? { progressionType, reps, loadKg }
           : null;
       }
@@ -154,11 +167,39 @@ export function SetInput({
 
   return (
     <div className="setinput">
-      {progressionType === "load_reps" && (
+      {progressionType === "load_reps" && !isBodyweight && (
         <div className="field-row">
           <NumField label="reps" value={a} onChange={setA} step="1" />
           <NumField label="carga (kg)" value={b} onChange={setB} />
         </div>
+      )}
+      {isBodyweight && (
+        <>
+          <div className="field-row">
+            <NumField label="reps" value={a} onChange={setA} step="1" />
+            {weighted && (
+              <NumField label="+kg (lastro)" value={b} onChange={setB} />
+            )}
+          </div>
+          <div className="choice-row">
+            <button
+              type="button"
+              className="choice"
+              aria-pressed={!weighted}
+              onClick={() => setWeighted(false)}
+            >
+              peso corporal
+            </button>
+            <button
+              type="button"
+              className="choice"
+              aria-pressed={weighted}
+              onClick={() => setWeighted(true)}
+            >
+              + lastro
+            </button>
+          </div>
+        </>
       )}
       {progressionType === "assisted_load" && (
         <div className="field-row">

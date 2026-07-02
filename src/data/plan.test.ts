@@ -10,6 +10,7 @@ import {
   getPhases,
   getPlanBlocksForWeek,
   getWorkBlockItems,
+  getAllExercises,
   getAttachableRoutines,
   getRoutineBlocks,
   currentWeek,
@@ -125,6 +126,24 @@ describe.each(engines)("plan — selectors sobre o seed — %s", (_name, openDb)
     const warm = items.find((i) => i.is_warmup === 1);
     expect(warm?.rep_min).toBeNull(); // aquecimento nao tem faixa
     expect(warm?.rep_max).toBeNull();
+  });
+
+  it("getWorkBlockItems: traz o load_type do exercicio (bodyweight vs carga)", async () => {
+    // B3: o load_type (cadastro) tem que chegar ate o LiveItem/SetInput pra
+    // decidir "peso corporal" (loadKg 0) vs campo de carga.
+    const items = await getWorkBlockItems(db, "wb_ter_forca");
+    const squat = items.find((i) => i.exercise_id === "ex_back_squat");
+    expect(squat?.load_type).toBe("barbell");
+    const warm = items.find((i) => i.is_warmup === 1);
+    expect(warm?.load_type).toBe("bodyweight"); // aquecimento dinamico = peso corporal
+  });
+
+  it("getAllExercises: traz o load_type (ad-hoc / substituto tambem podem ser bodyweight)", async () => {
+    const all = await getAllExercises(db);
+    const barra = all.find((e) => e.id === "ex_barra"); // pull-up = peso corporal
+    expect(barra?.load_type).toBe("bodyweight");
+    const squat = all.find((e) => e.id === "ex_back_squat");
+    expect(squat?.load_type).toBe("barbell");
   });
 
   it("getAttachableRoutines: recorrente primeiro", async () => {

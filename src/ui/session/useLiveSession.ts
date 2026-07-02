@@ -45,7 +45,7 @@ import type {
   PhaseEmphasis,
   PhaseKind,
 } from "../../engine/decision/phase.ts";
-import type { DeviationReason, ProgressionType } from "../../domain/types.ts";
+import type { DeviationReason, LoadType, ProgressionType } from "../../domain/types.ts";
 
 export type SessionPhase = "checking" | "idle" | "active" | "ended";
 
@@ -53,6 +53,7 @@ export interface ExerciseChoice {
   exerciseId: string;
   exerciseName: string;
   progressionType: ProgressionType;
+  loadType: LoadType; // B3: substituto/ad-hoc tambem podem ser peso corporal
 }
 
 export interface LiveSessionApi {
@@ -235,6 +236,7 @@ export function useLiveSession(): LiveSessionApi {
           exerciseId: si.exercise_id,
           exerciseName: si.exercise_name,
           progressionType: si.progression_type,
+          loadType: si.load_type as LoadType,
           workBlockItemId: si.work_block_item_id,
           isWarmup: si.is_warmup === 1,
           status,
@@ -405,6 +407,7 @@ export function useLiveSession(): LiveSessionApi {
             exerciseId: ex.exerciseId,
             exerciseName: ex.exerciseName,
             progressionType: ex.progressionType,
+            loadType: ex.loadType,
             workBlockItemId: null,
             isWarmup: false,
             status: "added",

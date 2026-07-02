@@ -13,7 +13,10 @@ import type { SetMeasures } from "../data/sessions.ts";
 export function formatMeasures(m: SetMeasures): string {
   switch (m.progressionType) {
     case "load_reps":
-      return `${m.reps} x ${m.loadKg} kg`;
+      // Carga 0 = peso corporal (pull-up/dips), coerente com lastExecutionSummary.
+      return m.loadKg === 0
+        ? `${m.reps} x peso corporal`
+        : `${m.reps} x ${m.loadKg} kg`;
     case "assisted_load":
       return `${m.reps} x assist. ${m.assistedLoadKg} kg`;
     case "isometric_intent":

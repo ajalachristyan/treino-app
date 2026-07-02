@@ -22,6 +22,7 @@ function wbi(over: Partial<WorkBlockItemRow>): WorkBlockItemRow {
     exercise_id: "ex_x",
     exercise_name: "Exercicio X",
     progression_type: "load_reps",
+    load_type: "barbell",
     priority: "primary",
     planned_sequence: 1,
     planned_sets: null,
@@ -75,6 +76,15 @@ describe("sessionModel", () => {
     expect(items[0]?.repMax).toBeNull();
   });
 
+  it("plannedToLiveItems: threada o load_type do cadastro pro LiveItem (B3)", () => {
+    const items = plannedToLiveItems([
+      wbi({ id: "wbi_barra", exercise_id: "ex_barra", load_type: "bodyweight" }),
+      wbi({ id: "wbi_squat", exercise_id: "ex_squat", load_type: "barbell" }),
+    ]);
+    expect(items[0]?.loadType).toBe("bodyweight");
+    expect(items[1]?.loadType).toBe("barbell");
+  });
+
   it("moveItem: reordena imutavelmente; indices invalidos -> copia inalterada", () => {
     const base: LiveItem[] = ["a", "b", "c"].map((k) => ({
       localKey: k,
@@ -82,6 +92,7 @@ describe("sessionModel", () => {
       exerciseId: k,
       exerciseName: k,
       progressionType: "load_reps",
+      loadType: "barbell",
       workBlockItemId: null,
       isWarmup: false,
       status: "planned",
@@ -107,6 +118,7 @@ describe("sessionModel", () => {
       exerciseId: k,
       exerciseName: k,
       progressionType: "load_reps",
+      loadType: "barbell",
       workBlockItemId: null,
       isWarmup: false,
       status: "planned",
@@ -130,6 +142,7 @@ describe("sessionModel — prescricao por fase (W3b)", () => {
     exerciseId: "ex_back_squat",
     exerciseName: "Back squat",
     progressionType: "load_reps",
+    loadType: "barbell",
     workBlockItemId: "wbi_ter_2",
     isWarmup: false,
     status: "planned",
@@ -204,6 +217,7 @@ describe("sessionModel — prescricao por fase (W3b)", () => {
         exerciseId: "ex_leg_press",
         exerciseName: "Leg press",
         progressionType: "load_reps",
+        loadType: "barbell",
       },
       "si_new",
     );
@@ -217,6 +231,20 @@ describe("sessionModel — prescricao por fase (W3b)", () => {
     expect(sub.plannedSets).toBeNull();
     expect(sub.repMin).toBeNull();
     expect(sub.repMax).toBeNull();
+  });
+
+  it("applySubstitution: threada o loadType do substituto (B3 — substituto pode ser peso corporal)", () => {
+    const sub = applySubstitution(
+      SQUAT_ITEM,
+      {
+        exerciseId: "ex_pistol",
+        exerciseName: "Pistol squat",
+        progressionType: "load_reps",
+        loadType: "bodyweight",
+      },
+      "si_new",
+    );
+    expect(sub.loadType).toBe("bodyweight"); // nao herda o 'barbell' do agachamento
   });
 });
 

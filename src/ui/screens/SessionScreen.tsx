@@ -90,7 +90,9 @@ function SuggestionLine({
       : "";
   const loadPart =
     suggestedLoadKg !== null
-      ? `${String(suggestedLoadKg)} kg`
+      ? suggestedLoadKg === 0
+        ? "peso corporal" // coerente com formatMeasures/lastExecutionSummary
+        : `${String(suggestedLoadKg)} kg`
       : intensityHintPct !== null
         ? `@~${String(Math.round(intensityHintPct * 100))}% · defina o kg`
         : "defina o kg";
@@ -224,6 +226,7 @@ function ItemCard({
         <SetInput
           key={item.exerciseId}
           progressionType={item.progressionType}
+          loadType={item.loadType}
           prefill={prefill.measures}
           onSave={(m, rpe) => api.logSet(item.localKey, m, rpe)}
         />

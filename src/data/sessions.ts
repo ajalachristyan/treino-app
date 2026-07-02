@@ -57,6 +57,7 @@ export interface SessionItemRow {
   exercise_id: string;
   exercise_name: string;
   progression_type: ProgressionType;
+  load_type: string; // B3: o resume precisa saber se e peso corporal
   work_block_item_id: string | null;
   from_routine_id: string | null;
   actual_sequence: number;
@@ -150,7 +151,7 @@ export function getSessionItems(
 ): Promise<SessionItemRow[]> {
   return db.all<SessionItemRow>(
     `SELECT si.id, si.session_id, si.exercise_id, e.name AS exercise_name,
-            e.progression_type, si.work_block_item_id, si.from_routine_id,
+            e.progression_type, e.load_type, si.work_block_item_id, si.from_routine_id,
             si.actual_sequence, si.status, si.deviation_reason, si.data_origin,
             si.is_warmup
      FROM session_item si JOIN exercise e ON e.id = si.exercise_id

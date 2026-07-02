@@ -38,6 +38,7 @@ export interface WorkBlockItemRow {
   exercise_id: string;
   exercise_name: string;
   progression_type: string;
+  load_type: string; // barbell/bodyweight/... (B3: decide "peso corporal" no input)
   priority: string;
   planned_sequence: number;
   planned_sets: number | null;
@@ -126,7 +127,7 @@ export function getWorkBlockItems(
 ): Promise<WorkBlockItemRow[]> {
   return db.all<WorkBlockItemRow>(
     `SELECT wbi.id, wbi.exercise_id, e.name AS exercise_name,
-            e.progression_type, e.priority, wbi.planned_sequence,
+            e.progression_type, e.load_type, e.priority, wbi.planned_sequence,
             wbi.planned_sets, wbi.notes, wbi.is_warmup, e.acute_interference,
             e.function_tag, e.rep_min, e.rep_max
      FROM work_block_item wbi
@@ -149,13 +150,14 @@ export interface ExerciseRow {
   id: string;
   name: string;
   progression_type: string;
+  load_type: string; // B3: ad-hoc/substituto tambem podem ser peso corporal
   function_tag: string | null;
 }
 
 /** Catalogo completo de exercicios (para escolher ad-hoc / substituto). */
 export function getAllExercises(db: Database): Promise<ExerciseRow[]> {
   return db.all<ExerciseRow>(
-    `SELECT id, name, progression_type, function_tag FROM exercise ORDER BY name`,
+    `SELECT id, name, progression_type, load_type, function_tag FROM exercise ORDER BY name`,
   );
 }
 

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getAllExercises, type ExerciseRow } from "../../data/plan.ts";
 import { useDb } from "../db/DbProvider.tsx";
 import type { ExerciseChoice } from "./useLiveSession.ts";
-import type { ProgressionType } from "../../domain/types.ts";
+import type { LoadType, ProgressionType } from "../../domain/types.ts";
 
 /**
  * Seletor de exercicio (para adicionar ad-hoc ou substituir). Lista o catalogo
@@ -74,6 +74,7 @@ export function ExercisePicker({
                   exerciseId: e.id,
                   exerciseName: e.name,
                   progressionType: e.progression_type as ProgressionType,
+                  loadType: e.load_type as LoadType,
                 })
               }
             >

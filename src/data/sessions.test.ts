@@ -78,6 +78,13 @@ describe.each(engines)("sessions — %s", (_name, openDb) => {
     expect(items).toHaveLength(0);
   });
 
+  it("getSessionItems: traz o load_type do exercicio (B3 — o resume precisa saber bodyweight)", async () => {
+    const sid = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    await markItemDone(db, { sessionId: sid, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T });
+    const items = await getSessionItems(db, sid);
+    expect(items[0]?.load_type).toBe("barbell");
+  });
+
   it("I-12: um fluxo completo de sessao NAO toca o plano", async () => {
     const before = await snapshotPlan();
 

@@ -6,7 +6,7 @@
 // (tipos + transformacoes), testavel sem React/DB.
 // =============================================================================
 
-import { newId, type ProgressionType } from "../../domain/types.ts";
+import { newId, type LoadType, type ProgressionType } from "../../domain/types.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
 import type { WorkBlockItemRow } from "../../data/plan.ts";
 import {
@@ -34,6 +34,7 @@ export interface LiveItem {
   exerciseId: string;
   exerciseName: string;
   progressionType: ProgressionType;
+  loadType: LoadType; // B3: decide "peso corporal" (loadKg 0) vs campo de carga
   workBlockItemId: string | null; // o planejado (preserva p/ I-15 / recuperar)
   isWarmup: boolean;
   status: LiveStatus;
@@ -56,6 +57,7 @@ export function plannedToLiveItems(
     exerciseId: p.exercise_id,
     exerciseName: p.exercise_name,
     progressionType: p.progression_type as ProgressionType,
+    loadType: p.load_type as LoadType,
     workBlockItemId: p.id,
     isWarmup: p.is_warmup === 1,
     status: "planned",
@@ -165,6 +167,7 @@ export function applySubstitution(
     exerciseId: string;
     exerciseName: string;
     progressionType: ProgressionType;
+    loadType: LoadType;
   },
   newItemId: string,
 ): LiveItem {
@@ -174,6 +177,7 @@ export function applySubstitution(
     exerciseId: sub.exerciseId,
     exerciseName: sub.exerciseName,
     progressionType: sub.progressionType,
+    loadType: sub.loadType, // o substituto pode ser peso corporal (nao herda o planejado)
     status: "substituted",
     sets: [],
     functionTag: null,
