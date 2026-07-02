@@ -15,7 +15,7 @@ import {
 } from "./sessions.ts";
 import type { DeviationReason } from "../domain/types.ts";
 import { computeAdherence } from "../engine/decision/adherence.ts";
-import { plannedOccurrences } from "./adherence.ts";
+import { plannedOccurrences, readinessNow } from "./adherence.ts";
 
 type AdapterFactory = (path: string) => Promise<Database>;
 const engines: ReadonlyArray<readonly [string, AdapterFactory]> = [
@@ -168,3 +168,77 @@ describe.each(engines)(
     });
   },
 );
+
+describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb) => {
+  let db: Database;
+  const start = localMidnight(new Date(2026, 0, 5)); // segunda-feira
+  const nowInWeek = (w: number): number =>
+    start + (w - 1) * WEEK_MS + 12 * HOUR_MS;
+
+  beforeEach(async () => {
+    db = await openDb(":memory:");
+    await applyMigrations(db, loadMigrations);
+    await setStartDate(db, start);
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it("guarda do placeholder: sem data real => null (nenhum banner)", async () => {
+    await db.close();
+    db = await openDb(":memory:");
+    await applyMigrations(db, loadMigrations); // sem setStartDate
+    expect(await readinessNow(db, nowInWeek(3))).toBeNull();
+  });
+
+  it("M1 com aderencia baixa: adherenceWarning + repeat_week, SEM riskPhaseGate", async () => {
+    // Semana 3 do Mes 1, nada logado -> fase mal seguida, mas M1 nao e risco.
+    const view = await readinessNow(db, nowInWeek(3));
+    expect(view).not.toBeNull();
+    expect(view!.adherenceWarning).toBe(true);
+    expect(view!.riskPhaseGate).toBe(false); // M1 nao e fase de risco
+    expect(view!.suggestedAdjustment).toBe("repeat_week");
+  });
+
+  it("M3 com base insuficiente: riskPhaseGate + extend_phase", async () => {
+    // Semana 11 (Mes 3), nada feito em M1/M2 -> base primary = 0.
+    const view = await readinessNow(db, nowInWeek(11));
+    expect(view).not.toBeNull();
+    expect(view!.riskPhaseGate).toBe(true);
+    expect(view!.suggestedAdjustment).toBe("extend_phase");
+  });
+
+  it("neglectedPrimary vem como NOME leigo, nao id de exercicio", async () => {
+    // Semana 5 do Mes 1, nada logado -> back squat largado (>= streak, placeholder 3).
+    const view = await readinessNow(db, nowInWeek(5));
+    expect(view).not.toBeNull();
+    expect(view!.neglectedPrimary).toContain("Back squat");
+    expect(view!.neglectedPrimary.every((n) => !n.startsWith("ex_"))).toBe(true);
+  });
+
+  it("P1: dia 1 do plano (fase sem ocorrencia vencida) NAO avisa aderencia (anti-culpa)", async () => {
+    // Segunda ao meio-dia da semana 1: nenhum dia venceu -> fase vazia. Nao pode
+    // dizer "voce esta atras" sem o dono ter tido chance de treinar.
+    const view = await readinessNow(db, nowInWeek(1));
+    expect(view).not.toBeNull();
+    expect(view!.adherenceWarning).toBe(false);
+    expect(view!.suggestedAdjustment).toBeNull();
+  });
+
+  it("P2: semana de deload leve NAO vira 'repita a semana' (recuperacao e de proposito)", async () => {
+    // Fim da semana 6 (Deload 1): dias vencidos, nada logado -> plano estrutural
+    // cheio contado, mas deload treina menos DE PROPOSITO. Sem nag de aderencia.
+    const nowEndOfWeek6 = start + 5 * WEEK_MS + 6 * DAY_MS + 12 * HOUR_MS;
+    const view = await readinessNow(db, nowEndOfWeek6);
+    expect(view).not.toBeNull();
+    expect(view!.adherenceWarning).toBe(false);
+  });
+
+  it("P3: taper (sem 16) NAO dispara o gate 'Mes 3' (peaking ja passou)", async () => {
+    // Base zerada (nada em M1/M2), mas taper NAO e o Mes 3 real -> sem riskPhaseGate.
+    const view = await readinessNow(db, nowInWeek(16));
+    expect(view).not.toBeNull();
+    expect(view!.riskPhaseGate).toBe(false);
+  });
+});

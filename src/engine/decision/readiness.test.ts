@@ -54,6 +54,23 @@ describe("assessReadiness — aviso de aderencia + sugestao", () => {
     expect(r.adherenceWarning).toBe(false);
     expect(r.suggestedAdjustment).toBeNull();
   });
+
+  it("fase VAZIA (planned=0) => NAO avisa (sem dado nao e culpa — anti-culpa)", () => {
+    // pct=0 por AUSENCIA de ocorrencia (nao por falha). Nao pode virar nag.
+    const r = assessReadiness({
+      phaseAdherence: {
+        planned: 0,
+        done: 0,
+        pct: 0,
+        byPriority: ZERO_TIERS,
+        primaryNeglectStreak: {},
+      },
+      enteringRiskPhase: false,
+      baseAdherencePct: 0.9,
+    });
+    expect(r.adherenceWarning).toBe(false);
+    expect(r.suggestedAdjustment).toBeNull();
+  });
 });
 
 describe("assessReadiness — trava da fase de risco (nao pular caminho)", () => {

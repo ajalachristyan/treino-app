@@ -37,7 +37,11 @@ export interface ReadinessAssessment {
 }
 
 export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
-  const adherenceWarning = input.phaseAdherence.pct < PHASE_ADHERENCE_WARN_PCT;
+  // pct=0 por AUSENCIA de ocorrencia (planned=0) e "sem dado", nao falha: nao
+  // avisa (anti-culpa — nao culpar sem base). Espelha o neutro da base no wiring.
+  const adherenceWarning =
+    input.phaseAdherence.planned > 0 &&
+    input.phaseAdherence.pct < PHASE_ADHERENCE_WARN_PCT;
   const riskPhaseGate =
     input.enteringRiskPhase && input.baseAdherencePct < PHASE_ADHERENCE_WARN_PCT;
 

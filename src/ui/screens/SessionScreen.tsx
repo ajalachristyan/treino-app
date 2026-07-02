@@ -25,6 +25,7 @@ import type { PhaseEmphasis, PhaseKind } from "../../engine/decision/phase.ts";
 import { SetInput } from "../session/SetInput.tsx";
 import { ExercisePicker } from "../session/ExercisePicker.tsx";
 import { PhaseBanner } from "../components/PhaseBanner.tsx";
+import { ReadinessBanner } from "../components/ReadinessBanner.tsx";
 import type { DeviationReason } from "../../domain/types.ts";
 import { formatMeasures, formatDuration } from "../labels.ts";
 
@@ -341,6 +342,7 @@ export function SessionScreen({ goHome }: { goHome: () => void }) {
       )}
 
       <PhaseBanner />
+      <ReadinessBanner />
 
       {api.warning !== null && (
         <div className="error-box" role="status">
