@@ -12,6 +12,7 @@ import {
   writeSet,
   skipItem,
   substituteItem,
+  addAdhocItem,
 } from "./sessions.ts";
 import type { DeviationReason } from "../domain/types.ts";
 import { computeAdherence } from "../engine/decision/adherence.ts";
@@ -31,6 +32,24 @@ const WEEK_MS = 7 * 86_400_000;
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const userChoice: DeviationReason = "user_choice";
+
+// Fixa o PISO de aderencia na 1a "sessao registrada" (decisao do dono: contar a
+// partir do 1o treino logado). Usa item AD-HOC (wbi NULL) -> so estabelece que
+// houve treino, sem marcar nenhuma ocorrencia planejada. Ancorar no 1o dia (dia
+// do start) faz o piso == start: nada e excluido, so garante que o piso existe.
+async function anchorFloor(dbx: Database, atMs: number): Promise<void> {
+  const s = await startTodaySession(dbx, {
+    planId: "pl_vertical_18w",
+    workBlockId: "wb_seg_ginastica",
+    now: atMs,
+  });
+  await addAdhocItem(dbx, {
+    sessionId: s,
+    exerciseId: "ex_banded_knee_drive",
+    actualSequence: 1,
+    now: atMs,
+  });
+}
 
 describe.each(engines)(
   "adherence data — plannedOccurrences — %s",
@@ -151,6 +170,7 @@ describe.each(engines)(
     });
 
     it("dia futuro nao vencido: nao conta como falta (anti-culpa)", async () => {
+      await anchorFloor(db, start + 8 * HOUR_MS); // piso no 1o dia (nao exclui nada)
       // "agora" = terca-feira da semana 1 de manha (so o 1o dia venceu).
       const early = start + 1 * DAY_MS + 9 * HOUR_MS; // week 1, dia 2
       const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 1 }, early);
@@ -159,7 +179,8 @@ describe.each(engines)(
     });
 
     it("multi-semana: order cronologico alimenta o primaryNeglectStreak (via computeAdherence)", async () => {
-      // Nenhuma sessao: back squat (primary) fica largado nas semanas 1 e 2.
+      await anchorFloor(db, start + 8 * HOUR_MS); // ha treino logado; piso == start
+      // back squat (primary) fica largado nas semanas 1 e 2.
       const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 2 }, now);
       const squat = occ.filter((o) => o.exerciseId === "ex_back_squat");
       expect(squat).toHaveLength(2); // uma por semana
@@ -169,6 +190,88 @@ describe.each(engines)(
       expect(summary.primaryNeglectStreak["ex_back_squat"]).toBe(2);
       // acessorio largado o mesmo tanto NAO entra no neglect de primary.
       expect(summary.primaryNeglectStreak["ex_rdl"]).toBeUndefined();
+    });
+
+    it("PISO: sem nenhuma sessao registrada => vazio (nao acusa quem nunca logou)", async () => {
+      // Plano ativo, semanas vencidas, mas o dono nunca registrou treino: sem
+      // piso, nada a cobrar (decisao do dono — conta a partir do 1o log).
+      const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 3 }, now);
+      expect(occ).toEqual([]);
+    });
+
+    it("PISO: ocorrencias ANTES da 1a sessao registrada nao viram falta", async () => {
+      // 1a sessao registrada na TERCA da semana 1 (back squat). start e segunda.
+      const tue = start + 1 * DAY_MS + 9 * HOUR_MS;
+      const s = await startTodaySession(db, {
+        planId: "pl_vertical_18w",
+        workBlockId: "wb_ter_forca",
+        now: tue,
+      });
+      const it = await markItemDone(db, {
+        sessionId: s,
+        exerciseId: "ex_back_squat",
+        workBlockItemId: "wbi_ter_2",
+        actualSequence: 1,
+        isWarmup: false,
+        now: tue,
+      });
+      await writeSet(db, {
+        sessionItemId: it,
+        setIndex: 1,
+        measures: { progressionType: "load_reps", reps: 5, loadKg: 100 },
+        now: tue,
+      });
+
+      const sun = start + 6 * DAY_MS + 12 * HOUR_MS; // domingo: semana 1 vencida
+      const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 1 }, sun);
+      // ex_abducao_faixa esta na SEGUNDA (wb_seg, antes do 1o log) e na QUARTA
+      // (wb_qua, depois). So a de quarta conta -> 1 ocorrencia, nao 2.
+      expect(occ.filter((o) => o.exerciseId === "ex_abducao_faixa")).toHaveLength(
+        1,
+      );
+      // A propria 1a sessao (back squat de terca) conta e esta done.
+      const squat = occ.filter((o) => o.exerciseId === "ex_back_squat");
+      expect(squat).toHaveLength(1);
+      expect(squat[0]!.done).toBe(true);
+    });
+
+    it("PISO: sessao ANTES do start (poke de onboarding) nao ancora; sem log no plano => vazio", async () => {
+      // Cutuca o app 3 dias ANTES do inicio (item ad-hoc). Depois so o plano roda,
+      // sem treino registrado NO plano -> nada a cobrar (piso e do PLANO, nao global).
+      await anchorFloor(db, start - 3 * DAY_MS);
+      const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 3 }, now);
+      expect(occ).toEqual([]);
+    });
+
+    it("PISO: poke pre-plano + 1o treino do plano na terca => piso na terca (ignora o poke)", async () => {
+      await anchorFloor(db, start - 3 * DAY_MS); // poke pre-plano (deve ser ignorado)
+      const tue = start + 1 * DAY_MS + 9 * HOUR_MS;
+      const s = await startTodaySession(db, {
+        planId: "pl_vertical_18w",
+        workBlockId: "wb_ter_forca",
+        now: tue,
+      });
+      const it = await markItemDone(db, {
+        sessionId: s,
+        exerciseId: "ex_back_squat",
+        workBlockItemId: "wbi_ter_2",
+        actualSequence: 1,
+        isWarmup: false,
+        now: tue,
+      });
+      await writeSet(db, {
+        sessionItemId: it,
+        setIndex: 1,
+        measures: { progressionType: "load_reps", reps: 5, loadKg: 100 },
+        now: tue,
+      });
+
+      const sun = start + 6 * DAY_MS + 12 * HOUR_MS;
+      const occ = await plannedOccurrences(db, { fromWeek: 1, toWeek: 1 }, sun);
+      // Segunda (antes da terca) excluida apesar do poke pre-plano -> so quarta.
+      expect(occ.filter((o) => o.exerciseId === "ex_abducao_faixa")).toHaveLength(
+        1,
+      );
     });
   },
 );
@@ -197,7 +300,8 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("M1 com aderencia baixa: adherenceWarning + repeat_week, SEM riskPhaseGate", async () => {
-    // Semana 3 do Mes 1, nada logado -> fase mal seguida, mas M1 nao e risco.
+    // Ha treino logado (piso), mas a fase M1 foi mal seguida. M1 nao e risco.
+    await anchorFloor(db, start + 8 * HOUR_MS);
     const view = await readinessNow(db, nowInWeek(3));
     expect(view).not.toBeNull();
     expect(view!.adherenceWarning).toBe(true);
@@ -206,7 +310,8 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("M3 com base insuficiente: riskPhaseGate + extend_phase", async () => {
-    // Semana 11 (Mes 3), nada feito em M1/M2 -> base primary = 0.
+    // Piso na semana 1, mas nada de PRIMARY feito em M1/M2 -> base primary = 0.
+    await anchorFloor(db, start + 8 * HOUR_MS);
     const view = await readinessNow(db, nowInWeek(11));
     expect(view).not.toBeNull();
     expect(view!.riskPhaseGate).toBe(true);
@@ -214,7 +319,8 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("neglectedPrimary vem como NOME leigo, nao id de exercicio", async () => {
-    // Semana 5 do Mes 1, nada logado -> back squat largado (>= streak, placeholder 3).
+    // Piso na semana 1; back squat largado as semanas (>= streak, placeholder 3).
+    await anchorFloor(db, start + 8 * HOUR_MS);
     const view = await readinessNow(db, nowInWeek(5));
     expect(view).not.toBeNull();
     expect(view!.neglectedPrimary).toContain("Back squat");
@@ -231,8 +337,9 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("P2: semana de deload leve NAO vira 'repita a semana' (recuperacao e de proposito)", async () => {
-    // Fim da semana 6 (Deload 1): dias vencidos, nada logado -> plano estrutural
-    // cheio contado, mas deload treina menos DE PROPOSITO. Sem nag de aderencia.
+    // Fim da semana 6 (Deload 1): piso na sem 1, plano estrutural cheio contado
+    // na fase, mas deload treina menos DE PROPOSITO. Sem nag de aderencia.
+    await anchorFloor(db, start + 8 * HOUR_MS);
     const nowEndOfWeek6 = start + 5 * WEEK_MS + 6 * DAY_MS + 12 * HOUR_MS;
     const view = await readinessNow(db, nowEndOfWeek6);
     expect(view).not.toBeNull();
@@ -240,7 +347,8 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("P3: taper (sem 16) NAO dispara o gate 'Mes 3' (peaking ja passou)", async () => {
-    // Base zerada (nada em M1/M2), mas taper NAO e o Mes 3 real -> sem riskPhaseGate.
+    // Piso na sem 1; base primary baixa, mas taper NAO e o Mes 3 real -> sem gate.
+    await anchorFloor(db, start + 8 * HOUR_MS);
     const view = await readinessNow(db, nowInWeek(16));
     expect(view).not.toBeNull();
     expect(view!.riskPhaseGate).toBe(false);
@@ -254,6 +362,7 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
   });
 
   it("adherenceOverview: fase ativa devolve semana, nome, resumo por tier e prontidao", async () => {
+    await anchorFloor(db, start + 8 * HOUR_MS); // piso == start (nada excluido)
     const ov = await adherenceOverview(db, nowInWeek(3));
     expect(ov).not.toBeNull();
     expect(ov!.week).toBe(3);
@@ -261,5 +370,36 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
     expect(ov!.summary.byPriority.primary.planned).toBeGreaterThan(0);
     expect(ov!.summary.done).toBe(0); // nada logado
     expect(ov!.readiness.adherenceWarning).toBe(true);
+  });
+
+  it("PISO: backdate direto pro M3 (1o log so no M3) => sem riskPhaseGate (sem base logada no plano = sem culpa)", async () => {
+    // Contrato (achado do red team, decisao do dono): base sem log no plano nao
+    // acusa base insuficiente. O dono pode virar isso se quiser gate por seguranca.
+    const tueW11 = start + 10 * WEEK_MS + 1 * DAY_MS + 9 * HOUR_MS;
+    const s = await startTodaySession(db, {
+      planId: "pl_vertical_18w",
+      workBlockId: "wb_ter_forca",
+      now: tueW11,
+    });
+    const it = await markItemDone(db, {
+      sessionId: s,
+      exerciseId: "ex_back_squat",
+      workBlockItemId: "wbi_ter_2",
+      actualSequence: 1,
+      isWarmup: false,
+      now: tueW11,
+    });
+    await writeSet(db, {
+      sessionItemId: it,
+      setIndex: 1,
+      measures: { progressionType: "load_reps", reps: 5, loadKg: 100 },
+      now: tueW11,
+    });
+    const view = await readinessNow(
+      db,
+      start + 10 * WEEK_MS + 3 * DAY_MS + 12 * HOUR_MS, // quinta, semana 11
+    );
+    expect(view).not.toBeNull();
+    expect(view!.riskPhaseGate).toBe(false);
   });
 });

@@ -74,6 +74,15 @@ export async function plannedOccurrences(
   if (plan === undefined) return [];
   if (!isStartDateSet(plan) || plan.start_date > now) return [];
 
+  // PISO (decisao do dono, 2026-07-01): a aderencia conta A PARTIR do 1o treino
+  // registrado DENTRO do plano (>= start_date). Sem log no plano, nao ha o que
+  // cobrar — nao acusa quem fez backdate no onboarding sem ter treinado, nem
+  // deixa um "poke" pre-inicio (ou sessao de ciclo anterior) derrubar o piso.
+  // Ocorrencias ANTES do 1o log nao viram falta (mas uma feita, se houver,
+  // ainda conta como done).
+  const firstLoggedMid = await firstLoggedMidnight(db, plan.start_date);
+  if (firstLoggedMid === undefined) return [];
+
   const curWeek = currentWeek(plan, now);
   const lo = Math.max(1, Math.floor(window.fromWeek));
   const hi = Math.min(Math.floor(window.toWeek), curWeek, plan.duration_weeks);
@@ -111,8 +120,9 @@ export async function plannedOccurrences(
       for (const item of items) {
         if (item.is_warmup === 1) continue;
         const done = doneSlots.has(item.id);
-        // Anti-culpa: dia de hoje/futuro nao-feito nao vira falta; feito conta.
-        if (!done && occMid >= todayMid) continue;
+        // Anti-culpa: nao-feito so conta como falta na janela [1o log, hoje).
+        // Antes do 1o log (piso) ou hoje/futuro nao vira falta; feito conta sempre.
+        if (!done && (occMid < firstLoggedMid || occMid >= todayMid)) continue;
         occurrences.push({
           exerciseId: item.exercise_id,
           priority: item.priority as ExercisePriority,
@@ -124,6 +134,29 @@ export async function plannedOccurrences(
   }
 
   return occurrences;
+}
+
+/**
+ * Meia-noite local da 1a sessao registrada DENTRO do plano (started_at >=
+ * planStartMs) com >= 1 session_item de qualquer status (abrir a sessao e tocar
+ * algo — feito/pulado/substituido/adhoc — ja conta). undefined se nao houve
+ * treino registrado no plano. Ancora o PISO da aderencia (contar a partir do 1o
+ * log do PLANO). O filtro por start_date evita que um "poke" de onboarding ANTES
+ * do inicio (ou sessao de ciclo anterior) derrube o piso e reintroduza a culpa.
+ */
+async function firstLoggedMidnight(
+  db: Database,
+  planStartMs: number,
+): Promise<number | undefined> {
+  const row = await db.get<{ first_at: number | null }>(
+    `SELECT MIN(s.started_at) AS first_at
+     FROM session s
+     WHERE s.started_at >= ?
+       AND EXISTS (SELECT 1 FROM session_item si WHERE si.session_id = s.id)`,
+    [planStartMs],
+  );
+  if (row == null || row.first_at == null) return undefined;
+  return localMidnight(new Date(row.first_at));
 }
 
 // ---------------------------------------------------------------------------
