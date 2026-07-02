@@ -71,6 +71,7 @@ export interface LiveSessionApi {
   start: () => void;
   resume: () => void;
   logSet: (localKey: string, measures: SetMeasures, rpe: number | null) => Promise<void>;
+  markDone: (localKey: string) => void; // fez, sem registrar serie (ancora o piso)
   skip: (localKey: string, reason: DeviationReason) => void;
   substitute: (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => void;
   addAdhoc: (ex: ExerciseChoice) => void;
@@ -301,6 +302,41 @@ export function useLiveSession(): LiveSessionApi {
     [db, run, commit, takeSeq],
   );
 
+  // "Fez" sem registrar serie: cria o session_item done (0 sets). Ancora o piso
+  // da aderencia e conta como feito; progressao/prefill ficam no-op (sem serie,
+  // executionHistoryFor ignora — a memoria da ultima real permanece). So toca o
+  // PLANEJADO intocado (o tocado ja tem linha). Mesmo molde do skip (anti-culpa).
+  const markDone = useCallback(
+    (localKey: string): void => {
+      void run(async () => {
+        const sid = sessionIdRef.current;
+        if (sid === null) return;
+        const item = itemsRef.current.find((i) => i.localKey === localKey);
+        if (item === undefined || item.status !== "planned") return;
+        const newItemId = await sessions.markItemDone(db, {
+          sessionId: sid,
+          exerciseId: item.exerciseId,
+          workBlockItemId: item.workBlockItemId,
+          actualSequence: takeSeq(),
+          isWarmup: item.isWarmup,
+          now: Date.now(),
+        });
+        // GUARDA o id (como logSet/substitute): o SetInput segue visivel num
+        // item done; se o dono logar uma serie depois, logSet vê sessionItemId
+        // != null e ANEXA a serie a ESTA linha — sem criar uma 2a session_item
+        // (row fantasma + card duplicado no resume). Red team B2.
+        commit(
+          patchItem(itemsRef.current, localKey, (it) => ({
+            ...it,
+            sessionItemId: newItemId,
+            status: "done",
+          })),
+        );
+      });
+    },
+    [db, run, commit, takeSeq],
+  );
+
   const skip = useCallback(
     (localKey: string, reason: DeviationReason): void => {
       void run(async () => {
@@ -456,6 +492,7 @@ export function useLiveSession(): LiveSessionApi {
     start,
     resume,
     logSet,
+    markDone,
     skip,
     substitute,
     addAdhoc,

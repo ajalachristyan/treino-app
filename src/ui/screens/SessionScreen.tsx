@@ -242,6 +242,12 @@ function ItemCard({
             </div>
           ) : (
             <>
+              <button type="button" className="linkbtn" onClick={() => api.markDone(item.localKey)}>
+                fez
+              </button>
+              <button type="button" className="linkbtn" onClick={() => api.skip(item.localKey, "user_choice")}>
+                não fez
+              </button>
               <button type="button" className="linkbtn" onClick={() => setSkipping(true)}>
                 pular
               </button>
