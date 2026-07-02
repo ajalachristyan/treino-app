@@ -1,8 +1,10 @@
 // =============================================================================
 // Aderencia (peca 1 da camada de aderencia+prontidao — spec 2026-07-01).
 //
-// Puro: sem DB. Recebe ocorrencias PLANEJADAS de exercicio (o wiring monta a
-// lista a partir de work_block_item x sessions x missed_session) e resume o
+// Puro: sem DB. Recebe ocorrencias PLANEJADAS de exercicio. O wiring
+// (src/data/adherence.ts) monta a lista de work_block_item x sessions; a FALTA e
+// derivada ESTRUTURALMENTE (ocorrencia vencida + slot nao-executado), NAO de
+// missed_session (essa fica para exibicao na tela W5). Resume o
 // quao bem o dono seguiu o plano, ponderado pela IMPORTANCIA (exercise.priority).
 // Consumido por readiness.ts (avisos/sugestoes) e pela tela de aderencia.
 //

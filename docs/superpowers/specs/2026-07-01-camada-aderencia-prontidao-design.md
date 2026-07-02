@@ -64,6 +64,8 @@ Dados (selectors — data layer)
                                               + "sugestão de ajuste — confirmar"
 ```
 
+> **Nota de implementação (2026-07-01, W2b):** o selector `plannedOccurrences` (`src/data/adherence.ts`) deriva "falta" **estruturalmente** (ocorrência vencida + slot não-executado), **não** de `missed_session`. Motivo: para dias passados os dois produzem o mesmo número — consultar `missed_session` seria código morto (anti-over-engineering). Faltas explicitamente registradas (P2.5) entram como **exibição** na tela de aderência (W5), não no cálculo do resumo. As menções a `missed_session`/`absences.ts` como coletor abaixo (§4.3) valem só para o **display** do W5.
+
 ### 4.1 `src/engine/decision/adherence.ts` (puro, novo)
 - **O que faz:** dado o planejado + executado + faltas de uma janela (semana / mês / fase), computa um resumo de aderência, **ponderado por `priority`**.
 - **Saída (`AdherenceSummary`):** sessões planejadas/feitas/faltadas; por tier de prioridade (feito × planejado × pulado); por exercício `primary` (sequência de vezes pulado).
