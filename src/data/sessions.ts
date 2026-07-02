@@ -81,6 +81,7 @@ export interface SessionSetRow {
   skill_achieved: number | null;
   quality: string | null;
   rpe: number | null;
+  cheat_reps: number | null; // B4: reps "roubadas" (registro; nao conta progressao)
 }
 
 /**
@@ -167,7 +168,7 @@ export function getSessionSets(
   return db.all<SessionSetRow>(
     `SELECT id, set_index, progression_type, reps, load_kg, assisted_load_kg,
             seconds, height_cm, intent_pct, difficulty_step, skill_achieved,
-            quality, rpe
+            quality, rpe, cheat_reps
      FROM session_set WHERE session_item_id = ? ORDER BY set_index`,
     [sessionItemId],
   );
@@ -425,6 +426,7 @@ export async function writeSet(
     measures: SetMeasures;
     qualitySecondary?: QualityPerSet | null;
     rpe?: number | null;
+    cheatReps?: number | null; // B4: reps roubadas (registro; nao progride carga)
     notes?: string | null;
     now: number;
   },
@@ -441,8 +443,9 @@ export async function writeSet(
     `INSERT INTO session_set
        (id, session_item_id, set_index, progression_type,
         reps, load_kg, assisted_load_kg, seconds, height_cm, intent_pct,
-        difficulty_step, skill_achieved, quality, rpe, notes, timestamp_server)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        difficulty_step, skill_achieved, quality, rpe, cheat_reps, notes,
+        timestamp_server)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       a.sessionItemId,
@@ -458,6 +461,7 @@ export async function writeSet(
       cols.skill_achieved,
       cols.quality,
       a.rpe ?? null,
+      a.cheatReps ?? null,
       a.notes ?? null,
       a.now,
     ],
@@ -506,6 +510,7 @@ interface ExecutionSetRow {
   session_item_id: string;
   reps: number; // filtrado NOT NULL no SQL
   load_kg: number; // filtrado NOT NULL no SQL
+  cheat_reps: number | null; // B4: registro (nao conta progressao)
 }
 
 /**
@@ -552,7 +557,7 @@ export async function executionHistoryFor(
   const itemIds = occurrences.map((o) => o.item_id);
   const placeholders = itemIds.map(() => "?").join(", ");
   const setRows = await db.all<ExecutionSetRow>(
-    `SELECT session_item_id, reps, load_kg
+    `SELECT session_item_id, reps, load_kg, cheat_reps
      FROM session_set
      WHERE session_item_id IN (${placeholders})
        AND reps IS NOT NULL AND load_kg IS NOT NULL
@@ -563,7 +568,12 @@ export async function executionHistoryFor(
   const setsByItem = new Map<string, SetData[]>();
   for (const row of setRows) {
     const list = setsByItem.get(row.session_item_id) ?? [];
-    list.push({ reps: row.reps, loadKg: row.load_kg });
+    list.push({
+      reps: row.reps,
+      loadKg: row.load_kg,
+      // so inclui a chave quando ha cheat (exactOptionalPropertyTypes).
+      ...(row.cheat_reps != null ? { cheatReps: row.cheat_reps } : {}),
+    });
     setsByItem.set(row.session_item_id, list);
   }
 

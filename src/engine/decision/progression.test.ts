@@ -48,4 +48,21 @@ describe("trava de progressao — maioria (~2/3) das series prescritas no topo",
   it("series completas mas fora do topo => NAO progride (dupla progressao intacta)", () => {
     expect(shouldProgressExercise("back_squat", [session([8, 8, 7])], RANGE, 3)).toBe(false);
   });
+
+  it("cheat reps NAO contam: 5 limpas (+3 cheat) por serie < topo => NAO progride (B4)", () => {
+    // Trava do contrato: cheat e registro, nunca sobe carga. Se algum dia a
+    // progressao somasse reps+cheat (=8=topo), este teste falharia.
+    const withCheat: SessionItemHistory = {
+      sessionId: "s1",
+      exerciseId: "back_squat",
+      status: "done",
+      isWarmup: false,
+      sets: [
+        { reps: 5, loadKg: 100, cheatReps: 3 },
+        { reps: 5, loadKg: 100, cheatReps: 3 },
+        { reps: 5, loadKg: 100, cheatReps: 3 },
+      ],
+    };
+    expect(shouldProgressExercise("back_squat", [withCheat], RANGE, 3)).toBe(false);
+  });
 });

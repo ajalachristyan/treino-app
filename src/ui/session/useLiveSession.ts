@@ -71,7 +71,12 @@ export interface LiveSessionApi {
   clearError: () => void;
   start: () => void;
   resume: () => void;
-  logSet: (localKey: string, measures: SetMeasures, rpe: number | null) => Promise<void>;
+  logSet: (
+    localKey: string,
+    measures: SetMeasures,
+    rpe: number | null,
+    cheatReps: number | null,
+  ) => Promise<void>;
   markDone: (localKey: string) => void; // fez, sem registrar serie (ancora o piso)
   skip: (localKey: string, reason: DeviationReason) => void;
   substitute: (localKey: string, sub: ExerciseChoice, reason: DeviationReason) => void;
@@ -244,6 +249,7 @@ export function useLiveSession(): LiveSessionApi {
             setIndex: r.set_index,
             measures: sessions.setRowToMeasures(r),
             rpe: r.rpe,
+            cheatReps: r.cheat_reps,
           })),
           // item tocado: ja tem series, nao precisa da prescricao por fase.
           functionTag: null,
@@ -270,7 +276,12 @@ export function useLiveSession(): LiveSessionApi {
   }, [db, run, commit]);
 
   const logSet = useCallback(
-    (localKey: string, measures: SetMeasures, rpe: number | null): Promise<void> =>
+    (
+      localKey: string,
+      measures: SetMeasures,
+      rpe: number | null,
+      cheatReps: number | null,
+    ): Promise<void> =>
       run(async () => {
         const sid = sessionIdRef.current;
         if (sid === null) throw new Error("A sessao nao esta ativa — recomece o treino.");
@@ -289,14 +300,14 @@ export function useLiveSession(): LiveSessionApi {
           });
         }
         const setIndex = item.sets.length + 1;
-        await sessions.writeSet(db, { sessionItemId, setIndex, measures, rpe, now });
+        await sessions.writeSet(db, { sessionItemId, setIndex, measures, rpe, cheatReps, now });
         const persistedId = sessionItemId;
         commit(
           patchItem(itemsRef.current, localKey, (it) => ({
             ...it,
             sessionItemId: persistedId,
             status: it.status === "planned" ? "done" : it.status,
-            sets: [...it.sets, { setIndex, measures, rpe }],
+            sets: [...it.sets, { setIndex, measures, rpe, cheatReps }],
           })),
         );
         setLastSetAt(now); // zera o cronometro de descanso

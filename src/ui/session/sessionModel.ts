@@ -16,12 +16,16 @@ import {
   type PrescriptionItem,
 } from "../../engine/decision/prescription.ts";
 import type { PhaseEmphasis, PhaseKind } from "../../engine/decision/phase.ts";
-import type { SessionItemHistory } from "../../engine/decision/progression.ts";
+import type {
+  SessionItemHistory,
+  SetData,
+} from "../../engine/decision/progression.ts";
 
 export interface LiveSet {
   setIndex: number;
   measures: SetMeasures;
   rpe: number | null;
+  cheatReps: number | null; // B4: reps roubadas registradas na serie
 }
 
 // "planned" = semeado do plano, intocado (sem linha no banco — evapora).
@@ -195,6 +199,11 @@ function formatLoad(kg: number): string {
   return kg === 0 ? "peso corporal" : `${String(kg)} kg`;
 }
 
+/** Reps da serie, anotando "(+N cheat)" quando houve reps roubadas (>0). */
+function formatReps(s: SetData): string {
+  return s.cheatReps ? `${String(s.reps)} (+${String(s.cheatReps)} cheat)` : String(s.reps);
+}
+
 /**
  * Resumo da execucao MAIS RECENTE (ultima do historico ASCENDENTE) — "o que
  * superar" na proxima. Carga uniforme -> "40 kg · 8, 8, 7"; cargas variando ->
@@ -211,9 +220,9 @@ export function lastExecutionSummary(
   if (first === undefined) return null;
   const uniform = sets.every((s) => s.loadKg === first.loadKg);
   if (uniform) {
-    return `${formatLoad(first.loadKg)} · ${sets.map((s) => String(s.reps)).join(", ")}`;
+    return `${formatLoad(first.loadKg)} · ${sets.map(formatReps).join(", ")}`;
   }
-  return sets.map((s) => `${formatLoad(s.loadKg)}×${String(s.reps)}`).join(", ");
+  return sets.map((s) => `${formatLoad(s.loadKg)}×${formatReps(s)}`).join(", ");
 }
 
 /** Rotulo curto e leigo do tipo (compartilhado com a leitura). */

@@ -206,6 +206,7 @@ function ItemCard({
           {item.sets.map((s) => (
             <li key={s.setIndex}>
               {formatMeasures(s.measures)}
+              {s.cheatReps ? ` (+${s.cheatReps} cheat)` : ""}
               {s.rpe !== null ? ` · RPE ${s.rpe}` : ""}
             </li>
           ))}
@@ -228,7 +229,7 @@ function ItemCard({
           progressionType={item.progressionType}
           loadType={item.loadType}
           prefill={prefill.measures}
-          onSave={(m, rpe) => api.logSet(item.localKey, m, rpe)}
+          onSave={(m, rpe, cheat) => api.logSet(item.localKey, m, rpe, cheat)}
         />
       )}
 

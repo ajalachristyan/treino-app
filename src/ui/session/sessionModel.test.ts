@@ -250,7 +250,7 @@ describe("sessionModel — prescricao por fase (W3b)", () => {
 
 describe("sessionModel — lastExecutionSummary (B1: o que superar)", () => {
   const hist = (
-    sets: ReadonlyArray<{ reps: number; loadKg: number }>,
+    sets: ReadonlyArray<{ reps: number; loadKg: number; cheatReps?: number }>,
   ): SessionItemHistory => ({
     sessionId: "s",
     exerciseId: "ex_x",
@@ -301,5 +301,26 @@ describe("sessionModel — lastExecutionSummary (B1: o que superar)", () => {
   it("usa a execucao MAIS RECENTE (ultima do array ascendente)", () => {
     const h = [hist([{ reps: 5, loadKg: 100 }]), hist([{ reps: 8, loadKg: 110 }])];
     expect(lastExecutionSummary(h)).toBe("110 kg · 8");
+  });
+
+  it("anota '(+N cheat)' nas series com cheat; sem cheat fica limpo (B4)", () => {
+    const h = [
+      hist([
+        { reps: 8, loadKg: 40, cheatReps: 2 },
+        { reps: 8, loadKg: 40 },
+        { reps: 7, loadKg: 40, cheatReps: 0 }, // 0 nao anota
+      ]),
+    ];
+    expect(lastExecutionSummary(h)).toBe("40 kg · 8 (+2 cheat), 8, 7");
+  });
+
+  it("cheat com carga variando: '(+N cheat)' por serie (B4)", () => {
+    const h = [
+      hist([
+        { reps: 8, loadKg: 40 },
+        { reps: 6, loadKg: 42.5, cheatReps: 1 },
+      ]),
+    ];
+    expect(lastExecutionSummary(h)).toBe("40 kg×8, 42.5 kg×6 (+1 cheat)");
   });
 });

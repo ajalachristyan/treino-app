@@ -535,6 +535,17 @@ describe.each(engines)("sessions — %s", (_name, openDb) => {
     expect(hist[0]?.sets[0]?.loadKg).toBe(100); // a referencia real (100kg) permanece
   });
 
+  it("executionHistoryFor: traz cheat_reps por serie (B4 — pra 'ultima vez')", async () => {
+    const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    const it = await markItemDone(db, { sessionId: s, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T });
+    await writeSet(db, { sessionItemId: it, setIndex: 1, measures: { progressionType: "load_reps", reps: 8, loadKg: 100 }, cheatReps: 2, now: T });
+    await writeSet(db, { sessionItemId: it, setIndex: 2, measures: { progressionType: "load_reps", reps: 6, loadKg: 100 }, now: T + 1 }); // sem cheat
+
+    const hist = await executionHistoryFor(db, "ex_back_squat", 5);
+    expect(hist[0]?.sets[0]?.cheatReps).toBe(2);
+    expect(hist[0]?.sets[1]?.cheatReps == null).toBe(true); // sem cheat => nulo
+  });
+
   it("executionHistoryFor: substituto entra pelo proprio id, nao pelo planejado (I-15)", async () => {
     const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
     // back squat (wbi_ter_2) substituido por zercher; exercise_id = SUBSTITUTO

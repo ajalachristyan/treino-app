@@ -15,6 +15,9 @@ import {
 export interface SetData {
   readonly reps: number;
   readonly loadKg: number;
+  // B4: reps "roubadas" na serie. REGISTRO/HISTORICO apenas — a progressao le so
+  // `reps` (limpas); cheat NUNCA sobe carga. Opcional (ausente = sem cheat).
+  readonly cheatReps?: number;
 }
 
 export interface SessionItemHistory {

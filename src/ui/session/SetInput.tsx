@@ -56,7 +56,11 @@ export function SetInput({
   progressionType: ProgressionType;
   loadType?: LoadType | undefined;
   prefill?: SetMeasures | undefined;
-  onSave: (measures: SetMeasures, rpe: number | null) => void | Promise<void>;
+  onSave: (
+    measures: SetMeasures,
+    rpe: number | null,
+    cheatReps: number | null,
+  ) => void | Promise<void>;
 }) {
   // Exercicio de peso corporal (pull-up/dips): a "carga" vira toggle "peso
   // corporal" (loadKg 0) vs "+ lastro" (kg extra). So no load_reps.
@@ -104,6 +108,7 @@ export function SetInput({
     prefill?.progressionType === "skill_acquisition" ? prefill.skillAchieved : null,
   );
   const [rpe, setRpe] = useState("");
+  const [cheat, setCheat] = useState(""); // reps roubadas (opcional; load_reps/assisted_load)
   const [saving, setSaving] = useState(false);
 
   const num = (s: string): number | null => {
@@ -163,7 +168,12 @@ export function SetInput({
   const r = num(rpe);
   // RPE e opcional; se preenchido, precisa estar em 0-10 (CHECK do schema).
   const rpeValid = rpe.trim() === "" || (r !== null && r >= 0 && r <= 10);
-  const canSave = measures !== null && rpeValid && !saving;
+  // Cheat reps so faz sentido em tipos com reps; opcional, inteiro >= 0.
+  const cheatApplies = progressionType === "load_reps" || progressionType === "assisted_load";
+  const cheatNum = num(cheat);
+  const cheatValid = cheat.trim() === "" || (cheatNum !== null && cheatNum >= 0);
+  const cheatToSave = cheatApplies && cheat.trim() !== "" ? cheatNum : null;
+  const canSave = measures !== null && rpeValid && cheatValid && !saving;
 
   return (
     <div className="setinput">
@@ -247,15 +257,21 @@ export function SetInput({
 
       <div className="field-row">
         <NumField label="RPE 0-10 (opc.)" value={rpe} onChange={setRpe} step="0.5" min="0" max="10" />
+        {cheatApplies && (
+          <NumField label="cheat reps (opc.)" value={cheat} onChange={setCheat} step="1" min="0" />
+        )}
         <button
           type="button"
           className="btn btn-primary setinput-save"
           disabled={!canSave}
           onClick={async () => {
-            if (measures === null || !rpeValid) return;
+            if (measures === null || !rpeValid || !cheatValid) return;
             setSaving(true);
             try {
-              await onSave(measures, r);
+              await onSave(measures, r, cheatToSave);
+              // Cheat e one-off (nao se repete toda serie): limpa pra proxima.
+              // reps/carga/RPE ficam (memoria deliberada). Red team B4/P1.
+              setCheat("");
             } finally {
               setSaving(false);
             }
@@ -265,6 +281,7 @@ export function SetInput({
         </button>
       </div>
       {!rpeValid && <p className="field-hint">RPE deve ser de 0 a 10.</p>}
+      {!cheatValid && <p className="field-hint">Cheat reps deve ser 0 ou mais.</p>}
     </div>
   );
 }
