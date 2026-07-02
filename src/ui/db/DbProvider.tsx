@@ -14,12 +14,16 @@ import { WaSqliteOpfsAdapter } from "../../db/adapters/wa-sqlite-opfs.ts";
 import { applyMigrations } from "../../db/runner.ts";
 import { loadMigrationsBrowser } from "../../db/migrations.browser.ts";
 import { registerOpfsLifecycle } from "../../db/lifecycle.ts";
+import { requestPersistentStorage } from "./persist.ts";
 
 let dbSingleton: Promise<Database> | null = null;
 
 function openDbOnce(): Promise<Database> {
   if (dbSingleton === null) {
     dbSingleton = (async (): Promise<Database> => {
+      // Durabilidade (Divida 3, mitigacao #1): pede armazenamento persistente no
+      // boot. Fire-and-forget, best-effort — nao bloqueia nem falha a abertura.
+      void requestPersistentStorage();
       const adapter = await WaSqliteOpfsAdapter.open("treino.sqlite");
       await applyMigrations(adapter, loadMigrationsBrowser);
       // Endurecimento Bloco A: solta os handles em background (best-effort).
