@@ -12,6 +12,7 @@ export const ROUTES = [
   "ajustes",
   "editar",
   "historico",
+  "aderencia",
 ] as const;
 export type Route = (typeof ROUTES)[number];
 

@@ -15,7 +15,11 @@ import {
 } from "./sessions.ts";
 import type { DeviationReason } from "../domain/types.ts";
 import { computeAdherence } from "../engine/decision/adherence.ts";
-import { plannedOccurrences, readinessNow } from "./adherence.ts";
+import {
+  plannedOccurrences,
+  readinessNow,
+  adherenceOverview,
+} from "./adherence.ts";
 
 type AdapterFactory = (path: string) => Promise<Database>;
 const engines: ReadonlyArray<readonly [string, AdapterFactory]> = [
@@ -240,5 +244,22 @@ describe.each(engines)("adherence data — readinessNow — %s", (_name, openDb)
     const view = await readinessNow(db, nowInWeek(16));
     expect(view).not.toBeNull();
     expect(view!.riskPhaseGate).toBe(false);
+  });
+
+  it("adherenceOverview: placeholder => null (empty state, sem culpa)", async () => {
+    await db.close();
+    db = await openDb(":memory:");
+    await applyMigrations(db, loadMigrations); // sem setStartDate
+    expect(await adherenceOverview(db, nowInWeek(3))).toBeNull();
+  });
+
+  it("adherenceOverview: fase ativa devolve semana, nome, resumo por tier e prontidao", async () => {
+    const ov = await adherenceOverview(db, nowInWeek(3));
+    expect(ov).not.toBeNull();
+    expect(ov!.week).toBe(3);
+    expect(ov!.phaseName).toContain("Mes 1");
+    expect(ov!.summary.byPriority.primary.planned).toBeGreaterThan(0);
+    expect(ov!.summary.done).toBe(0); // nada logado
+    expect(ov!.readiness.adherenceWarning).toBe(true);
   });
 });

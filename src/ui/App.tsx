@@ -11,6 +11,7 @@ import { ExerciseLibraryScreen } from "./screens/ExerciseLibraryScreen.tsx";
 import { ExerciseDetailScreen } from "./screens/ExerciseDetailScreen.tsx";
 import { PlanEditorScreen } from "./screens/PlanEditorScreen.tsx";
 import { HistoricoScreen } from "./screens/HistoricoScreen.tsx";
+import { AderenciaScreen } from "./screens/AderenciaScreen.tsx";
 
 const NAV: ReadonlyArray<readonly [Route, string]> = [
   ["hoje", "Hoje"],
@@ -34,6 +35,7 @@ function Shell() {
             onStart={() => navigate("sessao")}
             onAjustes={() => navigate("ajustes")}
             onHistorico={() => navigate("historico")}
+            onAderencia={() => navigate("aderencia")}
             onOpenExercise={openExercise}
           />
         )}
@@ -54,6 +56,12 @@ function Shell() {
         {loc.name === "ajustes" && <AjustesScreen />}
         {loc.name === "historico" && (
           <HistoricoScreen onBack={() => navigate("hoje")} />
+        )}
+        {loc.name === "aderencia" && (
+          <AderenciaScreen
+            onBack={() => navigate("hoje")}
+            onAjustes={() => navigate("ajustes")}
+          />
         )}
         {loc.name === "exercicio" && (
           <ExerciseDetailScreen id={loc.id} onBack={back} />

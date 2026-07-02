@@ -43,6 +43,7 @@ import {
   computeAdherence,
   type PlannedOccurrence,
   type ExercisePriority,
+  type AdherenceSummary,
 } from "../engine/decision/adherence.ts";
 import {
   assessReadiness,
@@ -228,4 +229,42 @@ async function exerciseNames(
   const all = await getAllExercises(db);
   const byId = new Map(all.map((e) => [e.id, e.name]));
   return ids.map((id) => byId.get(id) ?? id);
+}
+
+// ---------------------------------------------------------------------------
+// VISAO DA TELA (W5) — tudo que a AderenciaScreen precisa numa chamada guardada.
+// null => empty state (sem plano / data placeholder / inicio futuro / fora do
+// plano): a tela mostra mensagem sensata, nunca "0% (voce falhou)".
+// ---------------------------------------------------------------------------
+
+export interface AdherenceOverview {
+  readonly week: number;
+  readonly phaseName: string;
+  readonly summary: AdherenceSummary; // aderencia da fase corrente
+  readonly readiness: ReadinessView;
+}
+
+export async function adherenceOverview(
+  db: Database,
+  now: number,
+): Promise<AdherenceOverview | null> {
+  const plan = await getPlan(db);
+  if (plan === undefined) return null;
+  if (!isStartDateSet(plan) || plan.start_date > now) return null;
+
+  const phases = await getPhases(db, plan.id);
+  const week = currentWeek(plan, now);
+  const curPhase = phaseForWeek(phases, week);
+  if (curPhase === undefined) return null;
+
+  const phaseOcc = await plannedOccurrences(
+    db,
+    { fromWeek: curPhase.week_start, toWeek: curPhase.week_end },
+    now,
+  );
+  const summary = computeAdherence(phaseOcc);
+  const readiness = await readinessNow(db, now);
+  if (readiness === null) return null; // guardas coincidem; defensivo
+
+  return { week, phaseName: curPhase.name, summary, readiness };
 }

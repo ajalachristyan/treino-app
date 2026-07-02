@@ -41,11 +41,13 @@ export function TodayScreen({
   onStart,
   onAjustes,
   onHistorico,
+  onAderencia,
   onOpenExercise,
 }: {
   onStart: () => void;
   onAjustes: () => void;
   onHistorico: () => void;
+  onAderencia: () => void;
   onOpenExercise: (exerciseId: string) => void;
 }) {
   const db = useDb();
@@ -245,6 +247,14 @@ export function TodayScreen({
           onClick={onHistorico}
         >
           Treinos anteriores (Histórico)
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={onAderencia}
+        >
+          Aderência
         </button>
         <button
           type="button"
