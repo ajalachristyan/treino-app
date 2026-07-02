@@ -7,7 +7,10 @@
 // =============================================================================
 
 import { PROGRESSION_MIN_SETS_FRACTION } from "../../domain/constants.ts";
-import type { SessionItemStatus } from "../../domain/types.ts";
+import {
+  EXECUTED_SESSION_ITEM_STATUSES,
+  type SessionItemStatus,
+} from "../../domain/types.ts";
 
 export interface SetData {
   readonly reps: number;
@@ -22,14 +25,7 @@ export interface SessionItemHistory {
   readonly sets: ReadonlyArray<SetData>;
 }
 
-// Statuses que implicam EXECUCAO (item foi feito de fato, mesmo que seja
-// substituicao do que era planejado):
-const EXECUTED_STATUSES: ReadonlyArray<SessionItemStatus> = [
-  "done",
-  "substituted",
-  "reordered",
-  "added_adhoc",
-];
+// "Executado" vem da fonte unica EXECUTED_SESSION_ITEM_STATUSES (domain/types.ts).
 
 const NON_EXECUTED_STATUSES: ReadonlyArray<SessionItemStatus> = [
   "skipped",
@@ -51,7 +47,7 @@ export function latestExecutedOccurrence(
   for (const item of history) {
     if (
       item.exerciseId === exerciseId &&
-      EXECUTED_STATUSES.includes(item.status) &&
+      EXECUTED_SESSION_ITEM_STATUSES.includes(item.status) &&
       !item.isWarmup
     ) {
       latest = item; // cronologico: mantem a ultima ocorrencia executada

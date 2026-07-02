@@ -76,6 +76,21 @@ export const SESSION_ITEM_STATUSES = [
 ] as const;
 export type SessionItemStatus = (typeof SESSION_ITEM_STATUSES)[number];
 
+/**
+ * Statuses de session_item que implicam EXECUCAO (o item foi FEITO, mesmo que
+ * substituindo o planejado). FONTE UNICA da regra "o que conta como executado" —
+ * consumida pela progressao (progression.ts), pelo historico de execucao
+ * (sessions.ts: executionHistoryFor) e pela aderencia (data/adherence.ts).
+ * Adicionar/reclassificar um status aqui propaga para os tres; skipped/deferred
+ * ficam DE FORA (nao-feito). Ver feedback-single-source-of-truth.
+ */
+export const EXECUTED_SESSION_ITEM_STATUSES: readonly SessionItemStatus[] = [
+  "done",
+  "substituted",
+  "reordered",
+  "added_adhoc",
+];
+
 export const DEVIATION_REASONS = [
   "equipment_busy",
   "injury_avoidance",

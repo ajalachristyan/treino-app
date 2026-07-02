@@ -23,6 +23,7 @@ import type { Database } from "../db/adapter.ts";
 import {
   newId,
   assertValidDeviation,
+  EXECUTED_SESSION_ITEM_STATUSES,
   type SessionId,
   type SessionItemId,
   type SessionSetId,
@@ -524,11 +525,11 @@ export async function executionHistoryFor(
      FROM session_item si
      JOIN session s ON s.id = si.session_id
      WHERE si.exercise_id = ?
-       AND si.status IN ('done', 'substituted', 'reordered', 'added_adhoc')
+       AND si.status IN (${EXECUTED_SESSION_ITEM_STATUSES.map(() => "?").join(", ")})
        AND si.is_warmup = 0
      ORDER BY s.started_at DESC, si.timestamp_server DESC
      LIMIT ?`,
-    [exerciseId, limit],
+    [exerciseId, ...EXECUTED_SESSION_ITEM_STATUSES, limit],
   );
   if (occurrences.length === 0) return [];
   occurrences.reverse(); // cronologico ASCENDENTE (o motor le a mais recente por ultimo)

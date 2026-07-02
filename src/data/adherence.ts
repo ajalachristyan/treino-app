@@ -35,6 +35,7 @@ import {
   isoDayOfWeek,
 } from "./plan.ts";
 import { isStartDateSet, localMidnight } from "./planConfig.ts";
+import { EXECUTED_SESSION_ITEM_STATUSES } from "../domain/types.ts";
 import type {
   PlannedOccurrence,
   ExercisePriority,
@@ -85,8 +86,8 @@ export async function plannedOccurrences(
        JOIN session s ON s.id = si.session_id
        WHERE s.started_at >= ? AND s.started_at < ?
          AND si.work_block_item_id IS NOT NULL
-         AND si.status IN ('done', 'substituted', 'reordered', 'added_adhoc')`,
-      [windowStart, windowEnd],
+         AND si.status IN (${EXECUTED_SESSION_ITEM_STATUSES.map(() => "?").join(", ")})`,
+      [windowStart, windowEnd, ...EXECUTED_SESSION_ITEM_STATUSES],
     );
     const doneSlots = new Set(doneRows.map((r) => r.work_block_item_id));
 
