@@ -183,6 +183,35 @@ export function applySubstitution(
   };
 }
 
+// ---------------------------------------------------------------------------
+// "O QUE SUPERAR" (B1) — resumo da execucao mais recente pra referencia na tela.
+// ---------------------------------------------------------------------------
+
+function formatLoad(kg: number): string {
+  return kg === 0 ? "peso corporal" : `${String(kg)} kg`;
+}
+
+/**
+ * Resumo da execucao MAIS RECENTE (ultima do historico ASCENDENTE) — "o que
+ * superar" na proxima. Carga uniforme -> "40 kg · 8, 8, 7"; cargas variando ->
+ * "40 kg×8, 42.5 kg×6". null sem historico / sem series. So load_reps (o
+ * executionHistoryFor so traz reps+carga; carga 0 = peso corporal).
+ */
+export function lastExecutionSummary(
+  history: readonly SessionItemHistory[],
+): string | null {
+  const last = history.length > 0 ? history[history.length - 1] : undefined;
+  if (last === undefined || last.sets.length === 0) return null;
+  const sets = last.sets;
+  const first = sets[0];
+  if (first === undefined) return null;
+  const uniform = sets.every((s) => s.loadKg === first.loadKg);
+  if (uniform) {
+    return `${formatLoad(first.loadKg)} · ${sets.map((s) => String(s.reps)).join(", ")}`;
+  }
+  return sets.map((s) => `${formatLoad(s.loadKg)}×${String(s.reps)}`).join(", ");
+}
+
 /** Rotulo curto e leigo do tipo (compartilhado com a leitura). */
 export const PROGRESSION_LABEL: Record<ProgressionType, string> = {
   load_reps: "carga x reps",

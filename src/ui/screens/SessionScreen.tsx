@@ -16,6 +16,7 @@ import {
   type LiveItem,
   sessionSuggestion,
   applyPrescriptionToPrefill,
+  lastExecutionSummary,
 } from "../session/sessionModel.ts";
 import type {
   Prescription,
@@ -134,6 +135,7 @@ function ItemCard({
     measures: SetMeasures | undefined;
   }>({ loaded: false, measures: undefined });
   const [suggestion, setSuggestion] = useState<Prescription | null>(null);
+  const [lastExec, setLastExec] = useState<string | null>(null);
 
   // Memoria de carga X intencao da fase: pre-preenche o input com a ultima
   // execucao, sobrescrevendo SO a carga pela sugestao da fase (se houver). Sem
@@ -143,6 +145,7 @@ function ItemCard({
     let alive = true;
     setPrefill({ loaded: false, measures: undefined });
     setSuggestion(null);
+    setLastExec(null);
     void Promise.all([
       lastMeasuresFor(db, item.exerciseId),
       executionHistoryFor(db, item.exerciseId, SUGGESTION_HISTORY_N),
@@ -150,6 +153,7 @@ function ItemCard({
       if (!alive) return;
       const presc = sessionSuggestion(item, phaseEmphasis, phaseKind, history);
       setSuggestion(presc);
+      setLastExec(lastExecutionSummary(history));
       setPrefill({
         loaded: true,
         measures: applyPrescriptionToPrefill(base, presc),
@@ -204,6 +208,10 @@ function ItemCard({
             </li>
           ))}
         </ol>
+      )}
+
+      {!isSkipped && lastExec !== null && (
+        <p className="muted lastexec">Última vez: {lastExec}</p>
       )}
 
       {!isSkipped &&

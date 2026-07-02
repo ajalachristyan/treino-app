@@ -271,6 +271,14 @@ button {
   color: var(--text-muted);
 }
 
+/* "Ultima vez" (B1: referencia do que superar) — linha discreta, sem culpa. */
+.lastexec {
+  margin: var(--sp-2) 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 /* ---- Botoes --------------------------------------------------------------- */
 .btn {
   appearance: none;

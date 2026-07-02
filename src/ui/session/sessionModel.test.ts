@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import type { WorkBlockItemRow } from "../../data/plan.ts";
 import type { SetMeasures } from "../../data/sessions.ts";
 import type { Prescription } from "../../engine/decision/prescription.ts";
+import type { SessionItemHistory } from "../../engine/decision/progression.ts";
 import {
   plannedToLiveItems,
   moveItem,
@@ -11,6 +12,7 @@ import {
   sessionSuggestion,
   applyPrescriptionToPrefill,
   applySubstitution,
+  lastExecutionSummary,
   type LiveItem,
 } from "./sessionModel.ts";
 
@@ -215,5 +217,61 @@ describe("sessionModel — prescricao por fase (W3b)", () => {
     expect(sub.plannedSets).toBeNull();
     expect(sub.repMin).toBeNull();
     expect(sub.repMax).toBeNull();
+  });
+});
+
+describe("sessionModel — lastExecutionSummary (B1: o que superar)", () => {
+  const hist = (
+    sets: ReadonlyArray<{ reps: number; loadKg: number }>,
+  ): SessionItemHistory => ({
+    sessionId: "s",
+    exerciseId: "ex_x",
+    status: "done",
+    isWarmup: false,
+    sets,
+  });
+
+  it("sem historico => null", () => {
+    expect(lastExecutionSummary([])).toBeNull();
+  });
+
+  it("execucao sem series => null", () => {
+    expect(lastExecutionSummary([hist([])])).toBeNull();
+  });
+
+  it("carga uniforme => 'X kg · reps por serie'", () => {
+    const h = [
+      hist([
+        { reps: 8, loadKg: 40 },
+        { reps: 8, loadKg: 40 },
+        { reps: 7, loadKg: 40 },
+      ]),
+    ];
+    expect(lastExecutionSummary(h)).toBe("40 kg · 8, 8, 7");
+  });
+
+  it("cargas variando => 'carga×reps' por serie", () => {
+    const h = [
+      hist([
+        { reps: 8, loadKg: 40 },
+        { reps: 6, loadKg: 42.5 },
+      ]),
+    ];
+    expect(lastExecutionSummary(h)).toBe("40 kg×8, 42.5 kg×6");
+  });
+
+  it("carga 0 (bodyweight) => 'peso corporal'", () => {
+    const h = [
+      hist([
+        { reps: 10, loadKg: 0 },
+        { reps: 8, loadKg: 0 },
+      ]),
+    ];
+    expect(lastExecutionSummary(h)).toBe("peso corporal · 10, 8");
+  });
+
+  it("usa a execucao MAIS RECENTE (ultima do array ascendente)", () => {
+    const h = [hist([{ reps: 5, loadKg: 100 }]), hist([{ reps: 8, loadKg: 110 }])];
+    expect(lastExecutionSummary(h)).toBe("110 kg · 8");
   });
 });
