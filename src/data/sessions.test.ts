@@ -509,6 +509,25 @@ describe.each(engines)("sessions — %s", (_name, openDb) => {
     expect(await executionHistoryFor(db, "ex_back_squat", 5)).toEqual([]);
   });
 
+  it("executionHistoryFor: execucao SEM serie (fez-sem-serie) nao entra — nao apaga a memoria da ultima real", async () => {
+    // B2: "marcar feito sem serie" cria um session_item done com ZERO series.
+    // Como a memoria de carga e a referencia "o que superar" (lastExecutionSummary)
+    // leem a ocorrencia executada MAIS RECENTE, uma ocorrencia sem carga NAO pode
+    // virar entrada de historico — senao apagaria a memoria da ultima execucao real.
+    // (Mesmo bug latente do substituto substituido-e-nao-logado.)
+    const s1 = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
+    const i1 = await markItemDone(db, { sessionId: s1, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T });
+    await writeSet(db, { sessionItemId: i1, setIndex: 1, measures: { progressionType: "load_reps", reps: 5, loadKg: 100 }, now: T });
+
+    // Sessao mais nova: "fez sem serie" — done, sem NENHUMA writeSet.
+    const s2 = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T + DAY });
+    await markItemDone(db, { sessionId: s2, exerciseId: "ex_back_squat", workBlockItemId: "wbi_ter_2", actualSequence: 1, isWarmup: false, now: T + DAY });
+
+    const hist = await executionHistoryFor(db, "ex_back_squat", 5);
+    expect(hist).toHaveLength(1); // so a execucao COM carga
+    expect(hist[0]?.sets[0]?.loadKg).toBe(100); // a referencia real (100kg) permanece
+  });
+
   it("executionHistoryFor: substituto entra pelo proprio id, nao pelo planejado (I-15)", async () => {
     const s = await startTodaySession(db, { planId: "pl_vertical_18w", workBlockId: "wb_ter_forca", now: T });
     // back squat (wbi_ter_2) substituido por zercher; exercise_id = SUBSTITUTO

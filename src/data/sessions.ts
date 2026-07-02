@@ -514,12 +514,21 @@ interface ExecutionSetRow {
  * Chaveia pelo exercise_id ATUAL feito (I-15: o substituto entra por si; o
  * planejado nao-feito nao entra). Exclui warmup e status nao-executado (a mesma
  * regra do motor). So series load_reps (com reps+carga) — as demais nao carregam.
+ * A exclusao e ao nivel da OCORRENCIA (EXISTS abaixo): uma execucao sem nenhuma
+ * serie de carga — fez-sem-serie, substituto nao-logado, ou tipos sem load_kg
+ * (assisted_load/salto/iso) — nao entra, pra nao virar a "mais recente" e apagar
+ * a memoria/referencia da ultima execucao real. Consumidor: sugestao + "Ultima vez".
  */
 export async function executionHistoryFor(
   db: Database,
   exerciseId: string,
   limit: number,
 ): Promise<SessionItemHistory[]> {
+  // So ocorrencias COM ao menos uma serie de carga (reps+load_kg). Um item
+  // executado sem serie ("fez sem serie", ou substituto trocado e nao logado)
+  // nao carrega dado de carga -> nao pode virar entrada de historico, senao
+  // apagaria a memoria/referencia da ultima execucao real. O EXISTS entra ANTES
+  // do LIMIT: as N mais recentes contadas sao N execucoes reais, nao vazias.
   const occurrences = await db.all<ExecutionOccurrenceRow>(
     `SELECT si.id AS item_id, si.session_id, si.exercise_id, si.status
      FROM session_item si
@@ -527,6 +536,11 @@ export async function executionHistoryFor(
      WHERE si.exercise_id = ?
        AND si.status IN (${EXECUTED_SESSION_ITEM_STATUSES.map(() => "?").join(", ")})
        AND si.is_warmup = 0
+       AND EXISTS (
+         SELECT 1 FROM session_set ss
+         WHERE ss.session_item_id = si.id
+           AND ss.reps IS NOT NULL AND ss.load_kg IS NOT NULL
+       )
      ORDER BY s.started_at DESC, si.timestamp_server DESC
      LIMIT ?`,
     [exerciseId, ...EXECUTED_SESSION_ITEM_STATUSES, limit],
